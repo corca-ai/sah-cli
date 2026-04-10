@@ -1,0 +1,17 @@
+linters:
+  enable:
+    - bodyclose
+    - errcheck
+    - errorlint
+    - gocognit
+    - gocritic
+    - govet
+    - ineffassign
+    - nilerr
+    - staticcheck
+    - unconvert
+    - unparam
+    - unused
+
+issues:
+  exclude-use-default: false
