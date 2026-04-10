@@ -248,8 +248,9 @@ func buildAgentCommand(
 			"--output-format", "stream-json",
 			"--permission-mode", "plan",
 			"--tools", "",
+			"--strict-mcp-config",
+			"--disable-slash-commands",
 			"--no-session-persistence",
-			"--bare",
 			prompt,
 		}
 	default:

@@ -423,11 +423,39 @@ func resolveExecutable() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}
-	executable, err = filepath.EvalSymlinks(executable)
+	executable, err = preferredLaunchdExecutable(executable)
+	if err != nil {
+		return "", err
+	}
+	return executable, nil
+}
+
+func preferredLaunchdExecutable(executable string) (string, error) {
+	cleaned := filepath.Clean(executable)
+	resolved, err := filepath.EvalSymlinks(cleaned)
 	if err != nil {
 		return "", fmt.Errorf("resolve executable symlink: %w", err)
 	}
-	return executable, nil
+
+	return selectLaunchdExecutable(resolved, []string{"/opt/homebrew/bin/sah", "/usr/local/bin/sah"})
+}
+
+func selectLaunchdExecutable(resolved string, candidates []string) (string, error) {
+	if canonical, err := filepath.EvalSymlinks(resolved); err == nil {
+		resolved = canonical
+	}
+
+	for _, candidate := range candidates {
+		target, targetErr := filepath.EvalSymlinks(candidate)
+		if targetErr != nil {
+			continue
+		}
+		if filepath.Clean(target) == filepath.Clean(resolved) {
+			return candidate, nil
+		}
+	}
+
+	return filepath.Clean(resolved), nil
 }
 
 func daemonStartCmd() error {

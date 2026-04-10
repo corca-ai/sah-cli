@@ -1,6 +1,7 @@
 package sah
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -89,5 +90,35 @@ func TestResolveAgentBinaryPathDoesNotFallbackFromConfiguredPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "re-run `sah daemon install`") {
 		t.Fatalf("expected daemon reinstall guidance, got %v", err)
+	}
+}
+
+func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, _, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "claude", Binary: "claude"},
+		"sonnet",
+		t.TempDir(),
+		`{"ok":true}`,
+		map[string]string{"claude": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+
+	args := strings.Join(command.Args[1:], " ")
+	if strings.Contains(args, "--bare") {
+		t.Fatalf("expected claude args to omit --bare, got %q", args)
+	}
+	if !strings.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("expected claude args to include --strict-mcp-config, got %q", args)
+	}
+	if !strings.Contains(args, "--disable-slash-commands") {
+		t.Fatalf("expected claude args to include --disable-slash-commands, got %q", args)
 	}
 }
