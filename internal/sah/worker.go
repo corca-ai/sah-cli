@@ -11,36 +11,40 @@ import (
 )
 
 type WorkerOptions struct {
-	Agent       string
-	Model       string
-	Interval    time.Duration
-	Timeout     time.Duration
-	TaskType    string
-	Once        bool
-	Output      io.Writer
-	ErrorOutput io.Writer
+	Agent           string
+	Agents          []string
+	RotateInstalled bool
+	Model           string
+	Models          map[string]string
+	Interval        time.Duration
+	Timeout         time.Duration
+	TaskType        string
+	Once            bool
+	Output          io.Writer
+	ErrorOutput     io.Writer
 }
 
 func RunWorker(ctx context.Context, config Config, options WorkerOptions) error {
 	client := NewClient(config.BaseURL, config.APIKey)
-	agentName := strings.TrimSpace(options.Agent)
-	if agentName == "" {
-		agentName = config.DefaultAgent
-	}
 
 	if strings.TrimSpace(config.APIKey) == "" {
 		return fmt.Errorf("not authenticated; run `sah auth login` first")
 	}
 
+	picker, err := NewAgentPicker(config, options)
+	if err != nil {
+		return err
+	}
+
 	if options.Once {
-		return runWorkerCycle(ctx, client, agentName, options)
+		return runWorkerCycle(ctx, client, picker.Next(), options)
 	}
 
 	ticker := time.NewTicker(options.Interval)
 	defer ticker.Stop()
 
 	for {
-		if err := runWorkerCycle(ctx, client, agentName, options); err != nil {
+		if err := runWorkerCycle(ctx, client, picker.Next(), options); err != nil {
 			if IsStatus(err, http.StatusUnauthorized) || IsStatus(err, http.StatusForbidden) {
 				return fmt.Errorf("api key rejected; run `sah auth login` again")
 			}
@@ -59,7 +63,7 @@ func RunWorker(ctx context.Context, config Config, options WorkerOptions) error 
 func runWorkerCycle(
 	ctx context.Context,
 	client *Client,
-	agentName string,
+	agent AgentSpec,
 	options WorkerOptions,
 ) error {
 	assignment, err := client.GetTask(ctx, options.TaskType)
@@ -83,8 +87,9 @@ func runWorkerCycle(
 	)
 
 	result, err := SolveAssignment(ctx, *assignment, AgentRunOptions{
-		Agent:   agentName,
+		Agent:   agent.Name,
 		Model:   options.Model,
+		Models:  options.Models,
 		Timeout: options.Timeout,
 	})
 	if err != nil {
@@ -105,13 +110,7 @@ func runWorkerCycle(
 		return fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
 	}
 
-	logLine(
-		options.Output,
-		"submitted contribution %d for assignment %d (%s)",
-		response.ContributionID,
-		assignment.AssignmentID,
-		assignment.TaskType,
-	)
+	PrintCycleSummary(options.Output, *assignment, result, response)
 	return nil
 }
 

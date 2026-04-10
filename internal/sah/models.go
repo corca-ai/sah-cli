@@ -81,3 +81,11 @@ type CLIExchangeResponse struct {
 	UserID int64  `json:"user_id"`
 	APIKey string `json:"api_key"`
 }
+
+type TokenUsage struct {
+	Available    bool
+	InputTokens  int64
+	OutputTokens int64
+	CachedTokens int64
+	TotalTokens  int64
+}

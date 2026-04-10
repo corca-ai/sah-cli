@@ -1,8 +1,10 @@
 package sah
 
 import (
+	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -25,12 +27,23 @@ type AgentStatus struct {
 type AgentRunOptions struct {
 	Agent   string
 	Model   string
+	Models  map[string]string
 	Timeout time.Duration
 }
 
 type AgentResult struct {
+	Agent     AgentSpec
+	Model     string
 	RawOutput string
 	Payload   map[string]any
+	Usage     TokenUsage
+	Duration  time.Duration
+}
+
+type structuredAgentOutput struct {
+	Text       string
+	Usage      TokenUsage
+	AgentError string
 }
 
 var SupportedAgents = []AgentSpec{
@@ -53,7 +66,7 @@ func InstalledAgents() []AgentStatus {
 }
 
 func ResolveAgent(name string) (AgentSpec, error) {
-	trimmed := strings.TrimSpace(strings.ToLower(name))
+	trimmed := normalizeAgentName(name)
 	if trimmed == "" {
 		for _, status := range InstalledAgents() {
 			if status.Installed {
@@ -102,33 +115,77 @@ func SolveAssignment(
 	}
 	defer os.RemoveAll(workdir)
 
-	command, err := buildAgentCommand(runCtx, agent, options.Model, workdir)
+	model := ModelForAgent(agent.Name, options.Model, options.Models)
+	startedAt := time.Now()
+	output, rawOutput, err := executeAgent(runCtx, agent, model, workdir, prompt)
 	if err != nil {
 		return nil, err
 	}
-	command.Stdin = strings.NewReader(prompt)
+
+	payload, err := ParseAgentPayload(output.Text)
+	if err != nil {
+		return nil, err
+	}
+
+	return &AgentResult{
+		Agent:     agent,
+		Model:     model,
+		RawOutput: rawOutput,
+		Payload:   payload,
+		Usage:     output.Usage,
+		Duration:  time.Since(startedAt),
+	}, nil
+}
+
+func executeAgent(
+	ctx context.Context,
+	agent AgentSpec,
+	model string,
+	workdir string,
+	prompt string,
+) (*structuredAgentOutput, string, error) {
+	command, useStdin, err := buildAgentCommand(ctx, agent, model, workdir, prompt)
+	if err != nil {
+		return nil, "", err
+	}
+	if useStdin {
+		command.Stdin = strings.NewReader(prompt)
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
 
-	if err := command.Run(); err != nil {
-		if stderrText := strings.TrimSpace(stderr.String()); stderrText != "" {
-			return nil, fmt.Errorf("%s failed: %w: %s", agent.Name, err, stderrText)
+	runErr := command.Run()
+	rawOutput := stdout.String()
+	output, parseErr := parseStructuredOutput(agent.Name, rawOutput)
+
+	if runErr != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message == "" && output.AgentError != "" {
+			message = output.AgentError
 		}
-		return nil, fmt.Errorf("%s failed: %w", agent.Name, err)
+		if message == "" && parseErr != nil {
+			message = parseErr.Error()
+		}
+		if message == "" {
+			message = strings.TrimSpace(rawOutput)
+		}
+		if message != "" {
+			return nil, rawOutput, fmt.Errorf("%s failed: %w: %s", agent.Name, runErr, message)
+		}
+		return nil, rawOutput, fmt.Errorf("%s failed: %w", agent.Name, runErr)
 	}
 
-	payload, err := ParseAgentPayload(stdout.String())
-	if err != nil {
-		return nil, err
+	if parseErr != nil {
+		return nil, rawOutput, fmt.Errorf("%s returned unreadable structured output: %w", agent.Name, parseErr)
+	}
+	if output.AgentError != "" && strings.TrimSpace(output.Text) == "" {
+		return nil, rawOutput, fmt.Errorf("%s failed: %s", agent.Name, output.AgentError)
 	}
 
-	return &AgentResult{
-		RawOutput: stdout.String(),
-		Payload:   payload,
-	}, nil
+	return output, rawOutput, nil
 }
 
 func buildAgentCommand(
@@ -136,13 +193,16 @@ func buildAgentCommand(
 	agent AgentSpec,
 	model string,
 	workdir string,
-) (*exec.Cmd, error) {
-	args := []string{}
+	prompt string,
+) (*exec.Cmd, bool, error) {
+	var args []string
+	useStdin := false
 
 	switch agent.Name {
 	case "codex":
 		args = []string{
 			"exec",
+			"--json",
 			"--skip-git-repo-check",
 			"--sandbox", "read-only",
 			"--color", "never",
@@ -150,24 +210,27 @@ func buildAgentCommand(
 			"--cd", workdir,
 			"-",
 		}
+		useStdin = true
 	case "gemini":
 		args = []string{
-			"--prompt", "",
+			"--prompt", prompt,
 			"--sandbox", "true",
 			"--approval-mode", "plan",
-			"--output-format", "text",
+			"--output-format", "stream-json",
 		}
 	case "claude":
 		args = []string{
 			"-p",
-			"--output-format", "text",
+			"--verbose",
+			"--output-format", "stream-json",
 			"--permission-mode", "plan",
 			"--tools", "",
 			"--no-session-persistence",
 			"--bare",
+			prompt,
 		}
 	default:
-		return nil, fmt.Errorf("unsupported agent %q", agent.Name)
+		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
 
 	if strings.TrimSpace(model) != "" {
@@ -176,5 +239,207 @@ func buildAgentCommand(
 
 	command := exec.CommandContext(ctx, agent.Binary, args...)
 	command.Dir = workdir
-	return command, nil
+	return command, useStdin, nil
+}
+
+func parseStructuredOutput(agentName string, raw string) (*structuredAgentOutput, error) {
+	switch agentName {
+	case "codex":
+		return parseCodexStructuredOutput(raw)
+	case "gemini":
+		return parseGeminiStructuredOutput(raw)
+	case "claude":
+		return parseClaudeStructuredOutput(raw)
+	default:
+		return nil, fmt.Errorf("unsupported agent %q", agentName)
+	}
+}
+
+func parseCodexStructuredOutput(raw string) (*structuredAgentOutput, error) {
+	output := &structuredAgentOutput{}
+
+	if err := parseJSONLines(raw, func(event map[string]any) {
+		switch stringValue(event["type"]) {
+		case "item.completed":
+			item := mapValue(event["item"])
+			if stringValue(item["type"]) == "agent_message" {
+				output.Text = strings.TrimSpace(stringValue(item["text"]))
+			}
+			if output.AgentError == "" && stringValue(item["type"]) == "error" && output.Text == "" {
+				output.AgentError = strings.TrimSpace(stringValue(item["message"]))
+			}
+		case "turn.completed":
+			output.Usage = parseCodexUsage(mapValue(event["usage"]))
+		}
+	}); err != nil {
+		return nil, err
+	}
+	return output, nil
+}
+
+func parseGeminiStructuredOutput(raw string) (*structuredAgentOutput, error) {
+	output := &structuredAgentOutput{}
+	var assistantText strings.Builder
+
+	if err := parseJSONLines(raw, func(event map[string]any) {
+		switch stringValue(event["type"]) {
+		case "message":
+			if stringValue(event["role"]) == "assistant" {
+				content := strings.TrimSpace(stringValue(event["content"]))
+				if content != "" {
+					if boolValue(event["delta"]) {
+						assistantText.WriteString(content)
+					} else {
+						if assistantText.Len() > 0 {
+							assistantText.WriteString("\n")
+						}
+						assistantText.WriteString(content)
+					}
+				}
+			}
+		case "result":
+			if stringValue(event["status"]) != "success" && output.AgentError == "" {
+				output.AgentError = strings.TrimSpace(stringValue(event["error"]))
+			}
+			output.Usage = parseGeminiUsage(mapValue(event["stats"]))
+		}
+	}); err != nil {
+		return nil, err
+	}
+
+	output.Text = strings.TrimSpace(assistantText.String())
+	return output, nil
+}
+
+func parseClaudeStructuredOutput(raw string) (*structuredAgentOutput, error) {
+	output := &structuredAgentOutput{}
+
+	if err := parseJSONLines(raw, func(event map[string]any) {
+		switch stringValue(event["type"]) {
+		case "assistant":
+			message := mapValue(event["message"])
+			content := arrayValue(message["content"])
+			for _, item := range content {
+				text := strings.TrimSpace(stringValue(mapValue(item)["text"]))
+				if text != "" {
+					output.Text = text
+				}
+			}
+		case "result":
+			output.Usage = parseClaudeUsage(mapValue(event["usage"]))
+			if boolValue(event["is_error"]) && output.AgentError == "" {
+				output.AgentError = strings.TrimSpace(stringValue(event["result"]))
+			}
+		}
+	}); err != nil {
+		return nil, err
+	}
+
+	return output, nil
+}
+
+func parseJSONLines(raw string, visit func(map[string]any)) error {
+	scanner := bufio.NewScanner(strings.NewReader(raw))
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		var event map[string]any
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			return fmt.Errorf("decode json line: %w", err)
+		}
+		visit(event)
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("scan json lines: %w", err)
+	}
+	return nil
+}
+
+func parseCodexUsage(usage map[string]any) TokenUsage {
+	return TokenUsage{
+		Available:    len(usage) > 0,
+		InputTokens:  int64Value(usage["input_tokens"]),
+		OutputTokens: int64Value(usage["output_tokens"]),
+		CachedTokens: int64Value(usage["cached_input_tokens"]),
+		TotalTokens:  int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"]),
+	}
+}
+
+func parseGeminiUsage(stats map[string]any) TokenUsage {
+	return TokenUsage{
+		Available:    len(stats) > 0,
+		InputTokens:  int64Value(stats["input_tokens"]),
+		OutputTokens: int64Value(stats["output_tokens"]),
+		CachedTokens: int64Value(stats["cached"]),
+		TotalTokens:  int64Value(stats["total_tokens"]),
+	}
+}
+
+func parseClaudeUsage(usage map[string]any) TokenUsage {
+	return TokenUsage{
+		Available:    len(usage) > 0,
+		InputTokens:  int64Value(usage["input_tokens"]),
+		OutputTokens: int64Value(usage["output_tokens"]),
+		CachedTokens: int64Value(usage["cache_read_input_tokens"]),
+		TotalTokens:  int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"]),
+	}
+}
+
+func mapValue(value any) map[string]any {
+	if mapped, ok := value.(map[string]any); ok {
+		return mapped
+	}
+	return map[string]any{}
+}
+
+func arrayValue(value any) []any {
+	if values, ok := value.([]any); ok {
+		return values
+	}
+	return nil
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case json.Number:
+		return typed.String()
+	default:
+		return ""
+	}
+}
+
+func int64Value(value any) int64 {
+	switch typed := value.(type) {
+	case int:
+		return int64(typed)
+	case int32:
+		return int64(typed)
+	case int64:
+		return typed
+	case float64:
+		return int64(typed)
+	case json.Number:
+		parsed, err := typed.Int64()
+		if err == nil {
+			return parsed
+		}
+		floatParsed, err := typed.Float64()
+		if err == nil {
+			return int64(floatParsed)
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+func boolValue(value any) bool {
+	typed, ok := value.(bool)
+	return ok && typed
 }

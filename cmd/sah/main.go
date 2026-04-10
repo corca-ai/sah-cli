@@ -71,8 +71,9 @@ Commands:
 
 Examples:
   sah auth login
-  sah run --agent codex
-  sah daemon install --agent claude --interval 30m
+  sah run --rotate-installed
+  sah run --agents codex,gemini,claude --models codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet
+  sah daemon install --agents codex,claude --interval 30m
   sah me
 `)
 }
@@ -169,7 +170,10 @@ func runCmd(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	agent := fs.String("agent", "", "Agent CLI to use: codex, gemini, claude")
+	agents := fs.String("agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude")
+	rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
 	model := fs.String("model", "", "Optional model override passed to the agent CLI")
+	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
 	interval := fs.String("interval", "", "Polling interval")
 	timeout := fs.String("timeout", "", "Per-assignment agent timeout")
 	taskType := fs.String("task-type", "", "Optional task type filter")
@@ -178,6 +182,12 @@ func runCmd(args []string) error {
 	daemonMode := fs.Bool("daemon", false, "Run non-interactively for launchd")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if err := validateAgentFlags(*agent, *agents, *rotateInstalled); err != nil {
+		return err
+	}
+	if !*daemonMode {
+		sah.PrintRunBanner(os.Stdout)
 	}
 
 	ctx, cancel := signalContext()
@@ -205,6 +215,16 @@ func runCmd(args []string) error {
 			return err
 		}
 	}
+	agentPool := sah.ParseAgentList(*agents)
+	if len(agentPool) > 0 {
+		if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{Agents: agentPool}); err != nil {
+			return err
+		}
+	}
+	agentModels, err := sah.ParseAgentModels(*models)
+	if err != nil {
+		return err
+	}
 
 	pollInterval, err := sah.ParsePollInterval(pickString(*interval, config.PollInterval))
 	if err != nil {
@@ -215,16 +235,29 @@ func runCmd(args []string) error {
 		return err
 	}
 
-	return sah.RunWorker(ctx, config, sah.WorkerOptions{
-		Agent:       pickString(*agent, config.DefaultAgent),
-		Model:       pickString(*model, config.AgentModel),
-		Interval:    pollInterval,
-		Timeout:     agentTimeout,
-		TaskType:    strings.TrimSpace(*taskType),
-		Once:        *once,
-		Output:      os.Stdout,
-		ErrorOutput: os.Stderr,
-	})
+	options := sah.WorkerOptions{
+		Agent:           pickString(*agent, config.DefaultAgent),
+		Agents:          agentPool,
+		RotateInstalled: *rotateInstalled,
+		Model:           pickString(*model, config.AgentModel),
+		Models:          sah.MergeAgentModels(config.AgentModels, agentModels),
+		Interval:        pollInterval,
+		Timeout:         agentTimeout,
+		TaskType:        strings.TrimSpace(*taskType),
+		Once:            *once,
+		Output:          os.Stdout,
+		ErrorOutput:     os.Stderr,
+	}
+
+	picker, err := sah.NewAgentPicker(config, options)
+	if err != nil {
+		return err
+	}
+	if !*daemonMode {
+		sah.PrintRunPlan(os.Stdout, config, options, picker.Pool())
+	}
+
+	return sah.RunWorker(ctx, config, options)
 }
 
 func daemonCmd(args []string) error {
@@ -237,11 +270,17 @@ func daemonCmd(args []string) error {
 		fs := flag.NewFlagSet("daemon install", flag.ContinueOnError)
 		fs.SetOutput(os.Stderr)
 		agent := fs.String("agent", "", "Default agent CLI for the daemon")
+		agents := fs.String("agents", "", "Comma-separated round-robin agent order for the daemon")
+		rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every installed supported agent CLI")
 		model := fs.String("model", "", "Default model override")
+		models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
 		interval := fs.String("interval", "", "Default polling interval")
 		timeout := fs.String("timeout", "", "Default per-assignment timeout")
 		baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 		if err := fs.Parse(args[1:]); err != nil {
+			return err
+		}
+		if err := validateAgentFlags(*agent, *agents, *rotateInstalled); err != nil {
 			return err
 		}
 
@@ -260,9 +299,30 @@ func daemonCmd(args []string) error {
 				return err
 			}
 			config.DefaultAgent = *agent
+			config.AgentPool = nil
+			config.RotateInstalled = false
+		}
+		if pool := sah.ParseAgentList(*agents); len(pool) > 0 {
+			if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{Agents: pool}); err != nil {
+				return err
+			}
+			config.AgentPool = pool
+			config.RotateInstalled = false
+		}
+		if *rotateInstalled {
+			if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{RotateInstalled: true}); err != nil {
+				return err
+			}
+			config.AgentPool = nil
+			config.RotateInstalled = true
 		}
 		if strings.TrimSpace(*model) != "" {
 			config.AgentModel = *model
+		}
+		if parsedModels, err := sah.ParseAgentModels(*models); err != nil {
+			return err
+		} else if parsedModels != nil {
+			config.AgentModels = parsedModels
 		}
 		if strings.TrimSpace(*interval) != "" {
 			if _, err := sah.ParsePollInterval(*interval); err != nil {
@@ -342,7 +402,13 @@ func daemonCmd(args []string) error {
 			return err
 		}
 		fmt.Printf("Base URL: %s\n", config.BaseURL)
-		fmt.Printf("Default agent: %s\n", config.DefaultAgent)
+		fmt.Printf("Agents: %s\n", sah.DescribeAgentMode(config, sah.WorkerOptions{}))
+		if model := strings.TrimSpace(config.AgentModel); model != "" {
+			fmt.Printf("Model: %s\n", model)
+		}
+		if models := sah.FormatAgentModels(config.AgentModels); models != "" {
+			fmt.Printf("Per-agent models: %s\n", models)
+		}
 		fmt.Printf("Interval: %s\n", config.PollInterval)
 		if loaded {
 			fmt.Println("Launchd: loaded")
@@ -492,13 +558,13 @@ func agentsCmd(args []string) error {
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "NAME\tINSTALLED\tPATH\tDESCRIPTION")
+	fmt.Fprintln(writer, "NAME\tINSTALLED\tPATH\tDESCRIPTION\tMODEL FLAG")
 	for _, status := range sah.InstalledAgents() {
 		installed := "no"
 		if status.Installed {
 			installed = "yes"
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\n", status.Name, installed, status.Path, status.Description)
+		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t--model / --models %s=<name>\n", status.Name, installed, status.Path, status.Description, status.Name)
 	}
 	return writer.Flush()
 }
@@ -585,6 +651,16 @@ func pickString(primary string, fallback string) string {
 		return primary
 	}
 	return fallback
+}
+
+func validateAgentFlags(agent string, agents string, rotateInstalled bool) error {
+	if rotateInstalled && (strings.TrimSpace(agent) != "" || strings.TrimSpace(agents) != "") {
+		return fmt.Errorf("--rotate-installed cannot be combined with --agent or --agents")
+	}
+	if strings.TrimSpace(agent) != "" && strings.TrimSpace(agents) != "" {
+		return fmt.Errorf("--agent cannot be combined with --agents")
+	}
+	return nil
 }
 
 func signalContext() (context.Context, context.CancelFunc) {

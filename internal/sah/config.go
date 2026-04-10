@@ -20,12 +20,15 @@ const (
 )
 
 type Config struct {
-	BaseURL      string `json:"base_url"`
-	APIKey       string `json:"api_key,omitempty"`
-	DefaultAgent string `json:"default_agent,omitempty"`
-	PollInterval string `json:"poll_interval,omitempty"`
-	AgentModel   string `json:"agent_model,omitempty"`
-	AgentTimeout string `json:"agent_timeout,omitempty"`
+	BaseURL         string            `json:"base_url"`
+	APIKey          string            `json:"api_key,omitempty"`
+	DefaultAgent    string            `json:"default_agent,omitempty"`
+	AgentPool       []string          `json:"agent_pool,omitempty"`
+	RotateInstalled bool              `json:"rotate_installed,omitempty"`
+	PollInterval    string            `json:"poll_interval,omitempty"`
+	AgentModel      string            `json:"agent_model,omitempty"`
+	AgentModels     map[string]string `json:"agent_models,omitempty"`
+	AgentTimeout    string            `json:"agent_timeout,omitempty"`
 }
 
 type Paths struct {
@@ -136,7 +139,11 @@ func normalizeConfig(config Config) Config {
 	}
 	if strings.TrimSpace(config.DefaultAgent) == "" {
 		config.DefaultAgent = defaults.DefaultAgent
+	} else {
+		config.DefaultAgent = normalizeAgentName(config.DefaultAgent)
 	}
+	config.AgentPool = normalizeAgentPool(config.AgentPool)
+	config.AgentModels = normalizeAgentModels(config.AgentModels)
 	if strings.TrimSpace(config.PollInterval) == "" {
 		config.PollInterval = defaults.PollInterval
 	}
@@ -148,6 +155,54 @@ func normalizeConfig(config Config) Config {
 
 func normalizeBaseURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
+
+func normalizeAgentName(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func normalizeAgentPool(pool []string) []string {
+	if len(pool) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(pool))
+	seen := map[string]struct{}{}
+	for _, entry := range pool {
+		name := normalizeAgentName(entry)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		normalized = append(normalized, name)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeAgentModels(models map[string]string) map[string]string {
+	if len(models) == 0 {
+		return nil
+	}
+
+	normalized := make(map[string]string, len(models))
+	for key, value := range models {
+		name := normalizeAgentName(key)
+		model := strings.TrimSpace(value)
+		if name == "" || model == "" {
+			continue
+		}
+		normalized[name] = model
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }
 
 func ParsePollInterval(raw string) (time.Duration, error) {
