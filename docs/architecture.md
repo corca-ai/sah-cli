@@ -40,4 +40,4 @@ The browser never receives the raw contributor API key. The local CLI proves pos
 
 ## Daemon Mode
 
-`sah daemon install` writes a per-user `launchd` plist and bootstraps it. The daemon runs `sah run --daemon`, so the service behavior is driven by the saved config defaults.
+`sah daemon install` writes a per-user `launchd` plist, captures the current shell `PATH` and `HOME`, bootstraps it, and starts it immediately. The daemon runs `sah run --daemon`, so the service behavior is driven by the saved config defaults.

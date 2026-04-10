@@ -2,11 +2,15 @@ package sah
 
 import (
 	"bytes"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 )
+
+const defaultLaunchdPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 func InstallLaunchAgent(paths Paths, executable string) error {
 	if err := os.MkdirAll(paths.LaunchAgentsDir, 0o755); err != nil {
@@ -16,7 +20,35 @@ func InstallLaunchAgent(paths Paths, executable string) error {
 		return fmt.Errorf("create logs dir: %w", err)
 	}
 
-	plist := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	plist := renderLaunchAgentPlist(
+		executable,
+		DefaultLaunchdCommand,
+		paths.LaunchAgentStdout,
+		paths.LaunchAgentStderr,
+		launchAgentEnvironment(),
+	)
+
+	if err := os.WriteFile(paths.LaunchAgentPlist, []byte(plist), 0o644); err != nil {
+		return fmt.Errorf("write launch agent plist: %w", err)
+	}
+
+	_ = StopLaunchAgent()
+	if err := BootstrapLaunchAgent(paths); err != nil {
+		return err
+	}
+	return StartLaunchAgent()
+}
+
+func renderLaunchAgentPlist(
+	executable string,
+	command string,
+	stdoutPath string,
+	stderrPath string,
+	environment map[string]string,
+) string {
+	environmentBlock := renderPlistEnvironment(environment)
+
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
@@ -28,6 +60,8 @@ func InstallLaunchAgent(paths Paths, executable string) error {
     <string>%s</string>
     <string>--daemon</string>
   </array>
+%s  <key>WorkingDirectory</key>
+  <string>%s</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
@@ -38,17 +72,87 @@ func InstallLaunchAgent(paths Paths, executable string) error {
   <string>%s</string>
 </dict>
 </plist>
-`, DefaultLaunchdLabel, executable, DefaultLaunchdCommand, paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+`,
+		plistEscape(DefaultLaunchdLabel),
+		plistEscape(executable),
+		plistEscape(command),
+		environmentBlock,
+		plistEscape(launchAgentWorkingDirectory()),
+		plistEscape(stdoutPath),
+		plistEscape(stderrPath),
+	)
+}
 
-	if err := os.WriteFile(paths.LaunchAgentPlist, []byte(plist), 0o644); err != nil {
-		return fmt.Errorf("write launch agent plist: %w", err)
+func launchAgentEnvironment() map[string]string {
+	environment := map[string]string{
+		"PATH": defaultLaunchdPATH,
 	}
 
-	_ = StopLaunchAgent()
-	if err := BootstrapLaunchAgent(paths); err != nil {
-		return err
+	for _, key := range []string{
+		"PATH",
+		"HOME",
+		"SHELL",
+		"LANG",
+		"LC_ALL",
+		"LC_CTYPE",
+		"XDG_CONFIG_HOME",
+		"XDG_DATA_HOME",
+		"XDG_CACHE_HOME",
+	} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			environment[key] = value
+		}
 	}
-	return StartLaunchAgent()
+
+	return environment
+}
+
+func launchAgentWorkingDirectory() string {
+	homeDir, err := os.UserHomeDir()
+	if err == nil && strings.TrimSpace(homeDir) != "" {
+		return homeDir
+	}
+	return "/"
+}
+
+func renderPlistEnvironment(environment map[string]string) string {
+	if len(environment) == 0 {
+		return ""
+	}
+
+	keys := make([]string, 0, len(environment))
+	for key, value := range environment {
+		if strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+
+	var builder strings.Builder
+	builder.WriteString("  <key>EnvironmentVariables</key>\n")
+	builder.WriteString("  <dict>\n")
+	for _, key := range keys {
+		builder.WriteString("    <key>")
+		builder.WriteString(plistEscape(key))
+		builder.WriteString("</key>\n")
+		builder.WriteString("    <string>")
+		builder.WriteString(plistEscape(environment[key]))
+		builder.WriteString("</string>\n")
+	}
+	builder.WriteString("  </dict>\n")
+	return builder.String()
+}
+
+func plistEscape(value string) string {
+	var buffer bytes.Buffer
+	if err := xml.EscapeText(&buffer, []byte(value)); err != nil {
+		return value
+	}
+	return buffer.String()
 }
 
 func BootstrapLaunchAgent(paths Paths) error {

@@ -29,6 +29,8 @@ For always-on background work:
 sah daemon install
 ```
 
+`sah daemon install` installs and starts the per-user `launchd` agent immediately. It also captures the current shell `PATH` and `HOME`, so re-run it after moving agent binaries or changing how `codex`, `gemini`, or `claude` are installed.
+
 ## Documentation
 
 - [Agent Guide](AGENTS.md)

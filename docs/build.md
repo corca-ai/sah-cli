@@ -37,6 +37,10 @@ sah me
 sah daemon install
 ```
 
+`sah daemon install` both installs and starts the `launchd` agent. Use `sah daemon start` only after a manual `stop` or after logging back into macOS.
+
+If the daemon cannot find `codex`, `gemini`, or `claude`, re-run `sah daemon install` from a shell where that agent is already on `PATH`. The install command captures the current shell environment for `launchd`.
+
 ## Test
 
 ```sh

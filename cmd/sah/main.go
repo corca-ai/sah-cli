@@ -325,8 +325,10 @@ func daemonInstallCmd(args []string) error {
 		return err
 	}
 
-	fmt.Printf("Installed launchd agent at %s\n", paths.LaunchAgentPlist)
+	fmt.Println("Installed and started SCIENCE@home launchd agent.")
+	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
 	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+	fmt.Println("Captured PATH and HOME from the current shell for launchd. Re-run `sah daemon install` after changing agent install paths.")
 	return nil
 }
 

@@ -42,10 +42,10 @@ func RunWorker(ctx context.Context, config Config, options WorkerOptions) error 
 
 	if options.Once {
 		_, err := runWorkerCycle(ctx, client, picker.Next(), options)
-		return err
+		return normalizeContextCancel(err)
 	}
 
-	return runContinuousWorker(ctx, client, picker, options)
+	return normalizeContextCancel(runContinuousWorker(ctx, client, picker, options))
 }
 
 func runContinuousWorker(
@@ -71,7 +71,7 @@ func runContinuousWorker(
 		}
 
 		logLine(options.Output, "sleeping for %s", options.Interval)
-		if err := normalizeContextCancel(sleepWithContext(ctx, options.Interval)); err != nil {
+		if err := sleepWithContext(ctx, options.Interval); err != nil {
 			return err
 		}
 	}
@@ -94,7 +94,7 @@ func waitForReadyAgent(
 			continue
 		}
 		logLine(options.Output, "all configured agents are cooling down; next retry in %s", humanDuration(wait))
-		if err := normalizeContextCancel(sleepWithContext(ctx, wait)); err != nil {
+		if err := sleepWithContext(ctx, wait); err != nil {
 			return AgentSpec{}, err
 		}
 	}
@@ -110,6 +110,9 @@ func clearAgentCooldown(backoff *AgentBackoff, agent AgentSpec, writer io.Writer
 func handleWorkerCycleError(backoff *AgentBackoff, err error, options WorkerOptions) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, context.Canceled) {
+		return err
 	}
 	if IsStatus(err, http.StatusUnauthorized) || IsStatus(err, http.StatusForbidden) {
 		return fmt.Errorf("api key rejected; run `sah auth login` again")
