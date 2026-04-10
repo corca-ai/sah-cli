@@ -113,7 +113,9 @@ func SolveAssignment(
 	if err != nil {
 		return nil, fmt.Errorf("create temp workspace: %w", err)
 	}
-	defer os.RemoveAll(workdir)
+	defer func() {
+		_ = os.RemoveAll(workdir)
+	}()
 
 	model := ModelForAgent(agent.Name, options.Model, options.Models)
 	startedAt := time.Now()

@@ -267,170 +267,229 @@ func daemonCmd(args []string) error {
 
 	switch args[0] {
 	case "install":
-		fs := flag.NewFlagSet("daemon install", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
-		agent := fs.String("agent", "", "Default agent CLI for the daemon")
-		agents := fs.String("agents", "", "Comma-separated round-robin agent order for the daemon")
-		rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every installed supported agent CLI")
-		model := fs.String("model", "", "Default model override")
-		models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
-		interval := fs.String("interval", "", "Default polling interval")
-		timeout := fs.String("timeout", "", "Default per-assignment timeout")
-		baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-		if err := fs.Parse(args[1:]); err != nil {
-			return err
-		}
-		if err := validateAgentFlags(*agent, *agents, *rotateInstalled); err != nil {
-			return err
-		}
-
-		ctx, cancel := signalContext()
-		defer cancel()
-
-		paths, config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(*baseURL) != "" {
-			config.BaseURL = *baseURL
-		}
-		if strings.TrimSpace(*agent) != "" {
-			if _, err := sah.ResolveAgent(*agent); err != nil {
-				return err
-			}
-			config.DefaultAgent = *agent
-			config.AgentPool = nil
-			config.RotateInstalled = false
-		}
-		if pool := sah.ParseAgentList(*agents); len(pool) > 0 {
-			if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{Agents: pool}); err != nil {
-				return err
-			}
-			config.AgentPool = pool
-			config.RotateInstalled = false
-		}
-		if *rotateInstalled {
-			if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{RotateInstalled: true}); err != nil {
-				return err
-			}
-			config.AgentPool = nil
-			config.RotateInstalled = true
-		}
-		if strings.TrimSpace(*model) != "" {
-			config.AgentModel = *model
-		}
-		if parsedModels, err := sah.ParseAgentModels(*models); err != nil {
-			return err
-		} else if parsedModels != nil {
-			config.AgentModels = parsedModels
-		}
-		if strings.TrimSpace(*interval) != "" {
-			if _, err := sah.ParsePollInterval(*interval); err != nil {
-				return err
-			}
-			config.PollInterval = *interval
-		}
-		if strings.TrimSpace(*timeout) != "" {
-			if _, err := sah.ParseAgentTimeout(*timeout); err != nil {
-				return err
-			}
-			config.AgentTimeout = *timeout
-		}
-
-		if strings.TrimSpace(config.APIKey) == "" {
-			if err := loginAndPersist(ctx, paths, &config, true); err != nil {
-				return err
-			}
-		} else if err := sah.SaveConfig(paths, config); err != nil {
-			return err
-		}
-
-		executable, err := os.Executable()
-		if err != nil {
-			return fmt.Errorf("resolve executable path: %w", err)
-		}
-		executable, err = filepath.EvalSymlinks(executable)
-		if err != nil {
-			return fmt.Errorf("resolve executable symlink: %w", err)
-		}
-
-		if err := sah.InstallLaunchAgent(paths, executable); err != nil {
-			return err
-		}
-
-		fmt.Printf("Installed launchd agent at %s\n", paths.LaunchAgentPlist)
-		fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
-		return nil
+		return daemonInstallCmd(args[1:])
 	case "start":
-		paths, _, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		if _, err := os.Stat(paths.LaunchAgentPlist); err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return fmt.Errorf("launchd agent is not installed")
-			}
-			return err
-		}
-		loaded, _, err := sah.LaunchAgentStatus()
-		if err != nil {
-			return err
-		}
-		if !loaded {
-			if err := sah.BootstrapLaunchAgent(paths); err != nil {
-				return err
-			}
-		}
-		if err := sah.StartLaunchAgent(); err != nil {
-			return err
-		}
-		fmt.Println("Started SCIENCE@home launchd agent.")
-		return nil
+		return daemonStartCmd()
 	case "stop":
-		if err := sah.StopLaunchAgent(); err != nil {
-			return err
-		}
-		fmt.Println("Stopped SCIENCE@home launchd agent.")
-		return nil
+		return daemonStopCmd()
 	case "status":
-		paths, config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		loaded, _, err := sah.LaunchAgentStatus()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Base URL: %s\n", config.BaseURL)
-		fmt.Printf("Agents: %s\n", sah.DescribeAgentMode(config, sah.WorkerOptions{}))
-		if model := strings.TrimSpace(config.AgentModel); model != "" {
-			fmt.Printf("Model: %s\n", model)
-		}
-		if models := sah.FormatAgentModels(config.AgentModels); models != "" {
-			fmt.Printf("Per-agent models: %s\n", models)
-		}
-		fmt.Printf("Interval: %s\n", config.PollInterval)
-		if loaded {
-			fmt.Println("Launchd: loaded")
-		} else {
-			fmt.Println("Launchd: not loaded")
-		}
-		fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
-		fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
-		return nil
+		return daemonStatusCmd()
 	case "uninstall":
-		paths, _, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		if err := sah.UninstallLaunchAgent(paths); err != nil {
-			return err
-		}
-		fmt.Println("Removed SCIENCE@home launchd agent.")
-		return nil
+		return daemonUninstallCmd()
 	default:
 		return fmt.Errorf("usage: sah daemon install|start|stop|status|uninstall")
 	}
+}
+
+type daemonInstallOptions struct {
+	agent           string
+	agents          string
+	rotateInstalled bool
+	model           string
+	models          string
+	interval        string
+	timeout         string
+	baseURL         string
+}
+
+func daemonInstallCmd(args []string) error {
+	options, err := parseDaemonInstallOptions(args)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := signalContext()
+	defer cancel()
+
+	paths, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if err := applyDaemonInstallOptions(&config, options); err != nil {
+		return err
+	}
+
+	if strings.TrimSpace(config.APIKey) == "" {
+		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
+			return err
+		}
+	} else if err := sah.SaveConfig(paths, config); err != nil {
+		return err
+	}
+
+	executable, err := resolveExecutable()
+	if err != nil {
+		return err
+	}
+	if err := sah.InstallLaunchAgent(paths, executable); err != nil {
+		return err
+	}
+
+	fmt.Printf("Installed launchd agent at %s\n", paths.LaunchAgentPlist)
+	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+	return nil
+}
+
+func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
+	fs := flag.NewFlagSet("daemon install", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	options := daemonInstallOptions{}
+	fs.StringVar(&options.agent, "agent", "", "Default agent CLI for the daemon")
+	fs.StringVar(&options.agents, "agents", "", "Comma-separated round-robin agent order for the daemon")
+	fs.BoolVar(&options.rotateInstalled, "rotate-installed", false, "Rotate through every installed supported agent CLI")
+	fs.StringVar(&options.model, "model", "", "Default model override")
+	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
+	fs.StringVar(&options.interval, "interval", "", "Default polling interval")
+	fs.StringVar(&options.timeout, "timeout", "", "Default per-assignment timeout")
+	fs.StringVar(&options.baseURL, "base-url", "", "SCIENCE@home base URL")
+
+	if err := fs.Parse(args); err != nil {
+		return daemonInstallOptions{}, err
+	}
+	if err := validateAgentFlags(options.agent, options.agents, options.rotateInstalled); err != nil {
+		return daemonInstallOptions{}, err
+	}
+	return options, nil
+}
+
+func applyDaemonInstallOptions(config *sah.Config, options daemonInstallOptions) error {
+	if strings.TrimSpace(options.baseURL) != "" {
+		config.BaseURL = options.baseURL
+	}
+	if strings.TrimSpace(options.agent) != "" {
+		if _, err := sah.ResolveAgent(options.agent); err != nil {
+			return err
+		}
+		config.DefaultAgent = options.agent
+		config.AgentPool = nil
+		config.RotateInstalled = false
+	}
+	if pool := sah.ParseAgentList(options.agents); len(pool) > 0 {
+		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{Agents: pool}); err != nil {
+			return err
+		}
+		config.AgentPool = pool
+		config.RotateInstalled = false
+	}
+	if options.rotateInstalled {
+		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{RotateInstalled: true}); err != nil {
+			return err
+		}
+		config.AgentPool = nil
+		config.RotateInstalled = true
+	}
+	if strings.TrimSpace(options.model) != "" {
+		config.AgentModel = options.model
+	}
+	if parsedModels, err := sah.ParseAgentModels(options.models); err != nil {
+		return err
+	} else if parsedModels != nil {
+		config.AgentModels = parsedModels
+	}
+	if strings.TrimSpace(options.interval) != "" {
+		if _, err := sah.ParsePollInterval(options.interval); err != nil {
+			return err
+		}
+		config.PollInterval = options.interval
+	}
+	if strings.TrimSpace(options.timeout) != "" {
+		if _, err := sah.ParseAgentTimeout(options.timeout); err != nil {
+			return err
+		}
+		config.AgentTimeout = options.timeout
+	}
+	return nil
+}
+
+func resolveExecutable() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", fmt.Errorf("resolve executable path: %w", err)
+	}
+	executable, err = filepath.EvalSymlinks(executable)
+	if err != nil {
+		return "", fmt.Errorf("resolve executable symlink: %w", err)
+	}
+	return executable, nil
+}
+
+func daemonStartCmd() error {
+	paths, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if _, err := os.Stat(paths.LaunchAgentPlist); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("launchd agent is not installed")
+		}
+		return err
+	}
+
+	loaded, _, err := sah.LaunchAgentStatus()
+	if err != nil {
+		return err
+	}
+	if !loaded {
+		if err := sah.BootstrapLaunchAgent(paths); err != nil {
+			return err
+		}
+	}
+	if err := sah.StartLaunchAgent(); err != nil {
+		return err
+	}
+	fmt.Println("Started SCIENCE@home launchd agent.")
+	return nil
+}
+
+func daemonStopCmd() error {
+	if err := sah.StopLaunchAgent(); err != nil {
+		return err
+	}
+	fmt.Println("Stopped SCIENCE@home launchd agent.")
+	return nil
+}
+
+func daemonStatusCmd() error {
+	paths, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	loaded, _, err := sah.LaunchAgentStatus()
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Base URL: %s\n", config.BaseURL)
+	fmt.Printf("Agents: %s\n", sah.DescribeAgentMode(config, sah.WorkerOptions{}))
+	if model := strings.TrimSpace(config.AgentModel); model != "" {
+		fmt.Printf("Model: %s\n", model)
+	}
+	if models := sah.FormatAgentModels(config.AgentModels); models != "" {
+		fmt.Printf("Per-agent models: %s\n", models)
+	}
+	fmt.Printf("Interval: %s\n", config.PollInterval)
+	if loaded {
+		fmt.Println("Launchd: loaded")
+	} else {
+		fmt.Println("Launchd: not loaded")
+	}
+	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
+	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+	return nil
+}
+
+func daemonUninstallCmd() error {
+	paths, _, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if err := sah.UninstallLaunchAgent(paths); err != nil {
+		return err
+	}
+	fmt.Println("Removed SCIENCE@home launchd agent.")
+	return nil
 }
 
 func meCmd(args []string) error {
@@ -558,13 +617,13 @@ func agentsCmd(args []string) error {
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "NAME\tINSTALLED\tPATH\tDESCRIPTION\tMODEL FLAG")
+	_, _ = fmt.Fprintln(writer, "NAME\tINSTALLED\tPATH\tDESCRIPTION\tMODEL FLAG")
 	for _, status := range sah.InstalledAgents() {
 		installed := "no"
 		if status.Installed {
 			installed = "yes"
 		}
-		fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t--model / --models %s=<name>\n", status.Name, installed, status.Path, status.Description, status.Name)
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t--model / --models %s=<name>\n", status.Name, installed, status.Path, status.Description, status.Name)
 	}
 	return writer.Flush()
 }
@@ -615,9 +674,9 @@ func printHistorySection(title string, entries []sah.HistoryEntry) {
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "WHEN\tTASK\tSTATUS\tCREDITS\tSUBJECT")
+	_, _ = fmt.Fprintln(writer, "WHEN\tTASK\tSTATUS\tCREDITS\tSUBJECT")
 	for _, entry := range entries {
-		fmt.Fprintf(
+		_, _ = fmt.Fprintf(
 			writer,
 			"%s\t%s\t%s\t%d (%s)\t%s\n",
 			entry.CreatedAt.Local().Format("2006-01-02 15:04"),
@@ -639,9 +698,9 @@ func printLeaderboardSection(title string, entries []sah.LeaderboardEntry) {
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(writer, "RANK\tNAME\tSCORE")
+	_, _ = fmt.Fprintln(writer, "RANK\tNAME\tSCORE")
 	for index, entry := range entries {
-		fmt.Fprintf(writer, "%d\t%s\t%d\n", index+1, entry.Name, entry.Earned)
+		_, _ = fmt.Fprintf(writer, "%d\t%s\t%d\n", index+1, entry.Name, entry.Earned)
 	}
 	_ = writer.Flush()
 }

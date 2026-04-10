@@ -109,12 +109,12 @@ func SaveConfig(paths Paths, config Config) error {
 
 	tempName := tempFile.Name()
 	if _, err := tempFile.Write(data); err != nil {
-		tempFile.Close()
+		_ = tempFile.Close()
 		_ = os.Remove(tempName)
 		return fmt.Errorf("write temp config: %w", err)
 	}
 	if err := tempFile.Chmod(0o600); err != nil {
-		tempFile.Close()
+		_ = tempFile.Close()
 		_ = os.Remove(tempName)
 		return fmt.Errorf("chmod temp config: %w", err)
 	}

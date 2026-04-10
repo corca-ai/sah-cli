@@ -32,7 +32,9 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 	if err != nil {
 		return nil, fmt.Errorf("listen for auth callback: %w", err)
 	}
-	defer listener.Close()
+	defer func() {
+		_ = listener.Close()
+	}()
 
 	verifier, err := randomToken(32)
 	if err != nil {
@@ -49,12 +51,12 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 		return nil, err
 	}
 
-	fmt.Fprintf(options.Output, "Open this link to authenticate:\n%s\n\n", authURL)
+	_, _ = fmt.Fprintf(options.Output, "Open this link to authenticate:\n%s\n\n", authURL)
 	if options.OpenBrowser {
 		if err := openBrowser(authURL); err != nil {
-			fmt.Fprintf(options.Output, "Could not open a browser automatically: %v\n", err)
+			_, _ = fmt.Fprintf(options.Output, "Could not open a browser automatically: %v\n", err)
 		} else {
-			fmt.Fprintln(options.Output, "Opened your browser for SCIENCE@home login.")
+			_, _ = fmt.Fprintln(options.Output, "Opened your browser for SCIENCE@home login.")
 		}
 	}
 
@@ -62,7 +64,9 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 	server := &http.Server{
 		Handler: buildCallbackMux(state, callbacks),
 	}
-	defer server.Shutdown(context.Background())
+	defer func() {
+		_ = server.Shutdown(context.Background())
+	}()
 
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {

@@ -23,18 +23,7 @@ func PrintRunBanner(writer io.Writer) {
 		at = ansiRed + "@" + ansiReset
 	}
 
-	fmt.Fprintf(writer, "%s\n", strings.TrimSpace(fmt.Sprintf(`
-  ____   ____ ___ _____ _   _  ____ _____
- / ___| / ___|_ _| ____| \\ | |/ ___| ____|
- \\___ \\| |    | ||  _| |  \\| | |   |  _|
-  ___) | |___ | || |___| |\\  | |___| |___
- |____/ \\____|___|_____|_| \\_|\\____|_____|
-
-                %shome
-`, at)))
-	fmt.Fprintln(writer)
-	fmt.Fprintln(writer, "  contributor loop warming up...")
-	fmt.Fprintln(writer)
+	_, _ = fmt.Fprintf(writer, "SCIENCE%shome\n\n", at)
 }
 
 func PrintRunPlan(writer io.Writer, config Config, options WorkerOptions, pool []AgentSpec) {
@@ -47,25 +36,25 @@ func PrintRunPlan(writer io.Writer, config Config, options WorkerOptions, pool [
 		names = append(names, agent.Name)
 	}
 
-	fmt.Fprintf(writer, "Base URL:   %s\n", config.BaseURL)
-	fmt.Fprintf(writer, "Agents:     %s\n", strings.Join(names, " -> "))
+	_, _ = fmt.Fprintf(writer, "Base URL:   %s\n", config.BaseURL)
+	_, _ = fmt.Fprintf(writer, "Agents:     %s\n", strings.Join(names, " -> "))
 	if model := strings.TrimSpace(options.Model); model != "" {
-		fmt.Fprintf(writer, "Model:      %s\n", model)
+		_, _ = fmt.Fprintf(writer, "Model:      %s\n", model)
 	}
 	if models := FormatAgentModels(options.Models); models != "" {
-		fmt.Fprintf(writer, "Per-agent:  %s\n", models)
+		_, _ = fmt.Fprintf(writer, "Per-agent:  %s\n", models)
 	}
-	fmt.Fprintf(writer, "Interval:   %s\n", options.Interval)
-	fmt.Fprintf(writer, "Timeout:    %s\n", options.Timeout)
+	_, _ = fmt.Fprintf(writer, "Interval:   %s\n", options.Interval)
+	_, _ = fmt.Fprintf(writer, "Timeout:    %s\n", options.Timeout)
 	if options.TaskType != "" {
-		fmt.Fprintf(writer, "Task type:  %s\n", options.TaskType)
+		_, _ = fmt.Fprintf(writer, "Task type:  %s\n", options.TaskType)
 	}
 	if options.Once {
-		fmt.Fprintln(writer, "Mode:       single cycle")
+		_, _ = fmt.Fprintln(writer, "Mode:       single cycle")
 	} else {
-		fmt.Fprintln(writer, "Mode:       continuous")
+		_, _ = fmt.Fprintln(writer, "Mode:       continuous")
 	}
-	fmt.Fprintln(writer)
+	_, _ = fmt.Fprintln(writer)
 }
 
 func PrintCycleSummary(
@@ -78,23 +67,23 @@ func PrintCycleSummary(
 		return
 	}
 
-	fmt.Fprintln(writer, strings.Repeat("=", 72))
-	fmt.Fprintf(writer, "Assignment   #%d  %s / %s\n", assignment.AssignmentID, assignment.TaskType, assignment.TaskKey)
+	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
+	_, _ = fmt.Fprintf(writer, "Assignment   #%d  %s / %s\n", assignment.AssignmentID, assignment.TaskType, assignment.TaskKey)
 	if result.Model != "" {
-		fmt.Fprintf(writer, "Agent        %s (%s)\n", result.Agent.Name, result.Model)
+		_, _ = fmt.Fprintf(writer, "Agent        %s (%s)\n", result.Agent.Name, result.Model)
 	} else {
-		fmt.Fprintf(writer, "Agent        %s\n", result.Agent.Name)
+		_, _ = fmt.Fprintf(writer, "Agent        %s\n", result.Agent.Name)
 	}
-	fmt.Fprintf(writer, "Runtime      %s\n", humanDuration(result.Duration))
-	fmt.Fprintf(writer, "Tokens       %s\n", formatTokenUsage(result.Usage))
-	fmt.Fprintf(writer, "Contribution %s\n", SummarizeContribution(assignment, result.Payload))
-	fmt.Fprintf(
+	_, _ = fmt.Fprintf(writer, "Runtime      %s\n", humanDuration(result.Duration))
+	_, _ = fmt.Fprintf(writer, "Tokens       %s\n", formatTokenUsage(result.Usage))
+	_, _ = fmt.Fprintf(writer, "Contribution %s\n", SummarizeContribution(assignment, result.Payload))
+	_, _ = fmt.Fprintf(
 		writer,
 		"Submitted    contribution #%d, pending credits %d\n",
 		response.ContributionID,
 		response.PendingCredits,
 	)
-	fmt.Fprintln(writer, strings.Repeat("=", 72))
+	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
 }
 
 func formatTokenUsage(usage TokenUsage) string {

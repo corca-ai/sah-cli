@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(git rev-parse --show-toplevel)"
+
+if ! command -v golangci-lint >/dev/null 2>&1; then
+  echo "golangci-lint is required for this hook. Install it first."
+  echo "  brew install golangci-lint"
+  exit 1
+fi
+
+hash_file() {
+  if [ -f "$1" ]; then
+    git hash-object "$1"
+  fi
+}
+
+cleanup() { rm -rf .tmp-bin; }
+trap cleanup EXIT
+
+echo "Verifying modules..."
+go mod verify
+
+echo "Checking module tidiness..."
+before_mod="$(hash_file go.mod)"
+before_sum="$(hash_file go.sum)"
+go mod tidy
+after_mod="$(hash_file go.mod)"
+after_sum="$(hash_file go.sum)"
+if [ "$before_mod" != "$after_mod" ] || [ "$before_sum" != "$after_sum" ]; then
+  echo "go mod tidy changed go.mod or go.sum. Review and stage those updates first."
+  exit 1
+fi
+
+echo "Running tests..."
+CGO_ENABLED=1 go test -race ./...
+
+echo "Running lint..."
+golangci-lint run ./...
+
+echo "Building sah..."
+mkdir -p .tmp-bin
+go build -o .tmp-bin/sah ./cmd/sah

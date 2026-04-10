@@ -23,7 +23,7 @@ go build -o bin/sah ./cmd/sah
 For release builds, inject the version via `ldflags`.
 
 ```sh
-go build -trimpath -ldflags="-s -w -X main.version=v0.1.0" -o bin/sah ./cmd/sah
+go build -trimpath -ldflags="-s -w -X main.version=v0.2.0" -o bin/sah ./cmd/sah
 ```
 
 ## Run
@@ -49,13 +49,29 @@ go test ./...
 golangci-lint run
 ```
 
+## Pre-commit Hook
+
+The repository includes a pre-commit hook in `.githooks/`. Enable it once after cloning:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+The hook runs:
+
+- `go mod verify`
+- `go mod tidy` and checks that it does not rewrite `go.mod` or `go.sum`
+- `CGO_ENABLED=1 go test -race ./...`
+- `golangci-lint run ./...`
+- `go build -o .tmp-bin/sah ./cmd/sah`
+
 ## Release
 
 Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
 
 ```sh
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 Required repository secrets:

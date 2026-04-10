@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 func InstallLaunchAgent(paths Paths, executable string) error {
@@ -85,7 +86,11 @@ func UninstallLaunchAgent(paths Paths) error {
 func LaunchAgentStatus() (bool, string, error) {
 	output, err := runLaunchctl("print", launchdDomain()+"/"+DefaultLaunchdLabel)
 	if err != nil {
-		return false, "", nil
+		if strings.Contains(err.Error(), "Could not find service") || strings.Contains(err.Error(), "service not found") {
+			err = nil
+			return false, "", err
+		}
+		return false, "", err
 	}
 	return true, output, nil
 }

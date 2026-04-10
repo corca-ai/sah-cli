@@ -150,7 +150,9 @@ func (client *Client) doJSON(
 	if err != nil {
 		return fmt.Errorf("perform request: %w", err)
 	}
-	defer response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return decodeStatusError(response)
