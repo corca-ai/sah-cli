@@ -7,7 +7,7 @@ SCIENCE@home background contribution CLI for macOS.
 ### Homebrew
 
 ```sh
-brew install corca-ai/tap/sah
+brew install corca-ai/tap/sah-cli
 ```
 
 ### From source
@@ -29,7 +29,7 @@ For always-on background work:
 sah daemon install
 ```
 
-`sah daemon install` installs and starts the per-user `launchd` agent immediately. It also captures the current shell `PATH` and `HOME`, so re-run it after moving agent binaries or changing how `codex`, `gemini`, or `claude` are installed.
+`sah daemon install` installs and starts the per-user `launchd` agent immediately. It captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, then runs from `~/Library/Application Support/sah` instead of your home directory. Re-run it after moving `codex`, `gemini`, or `claude`.
 
 ## Documentation
 

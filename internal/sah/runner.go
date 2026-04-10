@@ -25,10 +25,11 @@ type AgentStatus struct {
 }
 
 type AgentRunOptions struct {
-	Agent   string
-	Model   string
-	Models  map[string]string
-	Timeout time.Duration
+	Agent       string
+	Model       string
+	Models      map[string]string
+	BinaryPaths map[string]string
+	Timeout     time.Duration
 }
 
 type AgentResult struct {
@@ -53,9 +54,13 @@ var SupportedAgents = []AgentSpec{
 }
 
 func InstalledAgents() []AgentStatus {
+	return InstalledAgentsWithBinaryPaths(nil)
+}
+
+func InstalledAgentsWithBinaryPaths(binaryPaths map[string]string) []AgentStatus {
 	statuses := make([]AgentStatus, 0, len(SupportedAgents))
 	for _, agent := range SupportedAgents {
-		path, err := exec.LookPath(agent.Binary)
+		path, err := resolveAgentBinaryPath(agent, binaryPaths)
 		statuses = append(statuses, AgentStatus{
 			AgentSpec: agent,
 			Path:      path,
@@ -66,20 +71,24 @@ func InstalledAgents() []AgentStatus {
 }
 
 func ResolveAgent(name string) (AgentSpec, error) {
+	return ResolveAgentWithBinaryPaths(name, nil)
+}
+
+func ResolveAgentWithBinaryPaths(name string, binaryPaths map[string]string) (AgentSpec, error) {
 	trimmed := normalizeAgentName(name)
 	if trimmed == "" {
-		for _, status := range InstalledAgents() {
+		for _, status := range InstalledAgentsWithBinaryPaths(binaryPaths) {
 			if status.Installed {
 				return status.AgentSpec, nil
 			}
 		}
-		return AgentSpec{}, fmt.Errorf("no supported agent CLI found in PATH")
+		return AgentSpec{}, fmt.Errorf("no supported agent CLI found in configured paths or PATH")
 	}
 
 	for _, agent := range SupportedAgents {
 		if agent.Name == trimmed {
-			if _, err := exec.LookPath(agent.Binary); err != nil {
-				return AgentSpec{}, fmt.Errorf("%s is not installed or not on PATH", agent.Binary)
+			if _, err := resolveAgentBinaryPath(agent, binaryPaths); err != nil {
+				return AgentSpec{}, err
 			}
 			return agent, nil
 		}
@@ -87,12 +96,22 @@ func ResolveAgent(name string) (AgentSpec, error) {
 	return AgentSpec{}, fmt.Errorf("unsupported agent %q", name)
 }
 
+func CaptureInstalledAgentBinaryPaths() map[string]string {
+	paths := map[string]string{}
+	for _, status := range InstalledAgents() {
+		if status.Installed && strings.TrimSpace(status.Path) != "" {
+			paths[status.Name] = status.Path
+		}
+	}
+	return normalizeAgentBinaryPaths(paths)
+}
+
 func SolveAssignment(
 	ctx context.Context,
 	assignment Assignment,
 	options AgentRunOptions,
 ) (*AgentResult, error) {
-	agent, err := ResolveAgent(options.Agent)
+	agent, err := ResolveAgentWithBinaryPaths(options.Agent, options.BinaryPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -119,7 +138,7 @@ func SolveAssignment(
 
 	model := ModelForAgent(agent.Name, options.Model, options.Models)
 	startedAt := time.Now()
-	output, rawOutput, err := executeAgent(runCtx, agent, model, workdir, prompt)
+	output, rawOutput, err := executeAgent(runCtx, agent, model, workdir, prompt, options.BinaryPaths)
 	if err != nil {
 		return nil, err
 	}
@@ -145,8 +164,9 @@ func executeAgent(
 	model string,
 	workdir string,
 	prompt string,
+	binaryPaths map[string]string,
 ) (*structuredAgentOutput, string, error) {
-	command, useStdin, err := buildAgentCommand(ctx, agent, model, workdir, prompt)
+	command, useStdin, err := buildAgentCommand(ctx, agent, model, workdir, prompt, binaryPaths)
 	if err != nil {
 		return nil, "", err
 	}
@@ -196,6 +216,7 @@ func buildAgentCommand(
 	model string,
 	workdir string,
 	prompt string,
+	binaryPaths map[string]string,
 ) (*exec.Cmd, bool, error) {
 	var args []string
 	useStdin := false
@@ -239,9 +260,42 @@ func buildAgentCommand(
 		args = append(args, "--model", model)
 	}
 
-	command := exec.CommandContext(ctx, agent.Binary, args...)
+	commandPath, err := resolveAgentBinaryPath(agent, binaryPaths)
+	if err != nil {
+		return nil, false, err
+	}
+
+	command := exec.CommandContext(ctx, commandPath, args...)
 	command.Dir = workdir
 	return command, useStdin, nil
+}
+
+func resolveAgentBinaryPath(agent AgentSpec, binaryPaths map[string]string) (string, error) {
+	configuredPaths := normalizeAgentBinaryPaths(binaryPaths)
+	if configuredPath, ok := configuredPaths[agent.Name]; ok {
+		if isExecutablePath(configuredPath) {
+			return configuredPath, nil
+		}
+		return "", fmt.Errorf("%s is configured at %s but unavailable; re-run `sah daemon install`", agent.Binary, configuredPath)
+	}
+
+	path, err := exec.LookPath(agent.Binary)
+	if err == nil {
+		return path, nil
+	}
+
+	return "", fmt.Errorf("%s is not installed or not on PATH", agent.Binary)
+}
+
+func isExecutablePath(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	if info.IsDir() {
+		return false
+	}
+	return info.Mode()&0o111 != 0
 }
 
 func parseStructuredOutput(agentName string, raw string) (*structuredAgentOutput, error) {

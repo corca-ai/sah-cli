@@ -32,21 +32,22 @@ func (picker *AgentPicker) Next() AgentSpec {
 }
 
 func ResolveAgentPool(config Config, options WorkerOptions) ([]AgentSpec, error) {
+	binaryPaths := effectiveAgentBinaryPaths(config, options)
 	switch {
 	case options.RotateInstalled:
-		return resolveInstalledAgentPool()
+		return resolveInstalledAgentPool(binaryPaths)
 	case len(options.Agents) > 0:
-		return resolveNamedAgentPool(options.Agents)
+		return resolveNamedAgentPool(options.Agents, binaryPaths)
 	case config.RotateInstalled:
-		return resolveInstalledAgentPool()
+		return resolveInstalledAgentPool(binaryPaths)
 	case len(config.AgentPool) > 0:
-		return resolveNamedAgentPool(config.AgentPool)
+		return resolveNamedAgentPool(config.AgentPool, binaryPaths)
 	default:
 		name := strings.TrimSpace(options.Agent)
 		if name == "" {
 			name = config.DefaultAgent
 		}
-		agent, err := ResolveAgent(name)
+		agent, err := ResolveAgentWithBinaryPaths(name, binaryPaths)
 		if err != nil {
 			return nil, err
 		}
@@ -54,20 +55,20 @@ func ResolveAgentPool(config Config, options WorkerOptions) ([]AgentSpec, error)
 	}
 }
 
-func resolveInstalledAgentPool() ([]AgentSpec, error) {
+func resolveInstalledAgentPool(binaryPaths map[string]string) ([]AgentSpec, error) {
 	pool := make([]AgentSpec, 0, len(SupportedAgents))
-	for _, status := range InstalledAgents() {
+	for _, status := range InstalledAgentsWithBinaryPaths(binaryPaths) {
 		if status.Installed {
 			pool = append(pool, status.AgentSpec)
 		}
 	}
 	if len(pool) == 0 {
-		return nil, fmt.Errorf("no supported agent CLI found in PATH")
+		return nil, fmt.Errorf("no supported agent CLI found in configured paths or PATH")
 	}
 	return pool, nil
 }
 
-func resolveNamedAgentPool(names []string) ([]AgentSpec, error) {
+func resolveNamedAgentPool(names []string, binaryPaths map[string]string) ([]AgentSpec, error) {
 	pool := make([]AgentSpec, 0, len(names))
 	seen := map[string]struct{}{}
 	for _, entry := range names {
@@ -78,7 +79,7 @@ func resolveNamedAgentPool(names []string) ([]AgentSpec, error) {
 		if _, ok := seen[name]; ok {
 			continue
 		}
-		agent, err := ResolveAgent(name)
+		agent, err := ResolveAgentWithBinaryPaths(name, binaryPaths)
 		if err != nil {
 			return nil, err
 		}
@@ -182,4 +183,19 @@ func FormatAgentModels(models map[string]string) string {
 		parts = append(parts, fmt.Sprintf("%s=%s", name, normalized[name]))
 	}
 	return strings.Join(parts, ", ")
+}
+
+func effectiveAgentBinaryPaths(config Config, options WorkerOptions) map[string]string {
+	if len(options.BinaryPaths) == 0 {
+		return config.AgentBinaryPaths
+	}
+
+	merged := map[string]string{}
+	for name, path := range normalizeAgentBinaryPaths(config.AgentBinaryPaths) {
+		merged[name] = path
+	}
+	for name, path := range normalizeAgentBinaryPaths(options.BinaryPaths) {
+		merged[name] = path
+	}
+	return normalizeAgentBinaryPaths(merged)
 }

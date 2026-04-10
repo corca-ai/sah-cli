@@ -210,14 +210,22 @@ func runCmd(args []string) error {
 		}
 	}
 
+	var binaryPaths map[string]string
+	if *daemonMode {
+		binaryPaths = config.AgentBinaryPaths
+	}
+
 	if strings.TrimSpace(*agent) != "" {
-		if _, err := sah.ResolveAgent(*agent); err != nil {
+		if _, err := sah.ResolveAgentWithBinaryPaths(*agent, binaryPaths); err != nil {
 			return err
 		}
 	}
 	agentPool := sah.ParseAgentList(*agents)
 	if len(agentPool) > 0 {
-		if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{Agents: agentPool}); err != nil {
+		if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
+			Agents:      agentPool,
+			BinaryPaths: binaryPaths,
+		}); err != nil {
 			return err
 		}
 	}
@@ -239,6 +247,7 @@ func runCmd(args []string) error {
 		Agent:           pickString(*agent, config.DefaultAgent),
 		Agents:          agentPool,
 		RotateInstalled: *rotateInstalled,
+		BinaryPaths:     binaryPaths,
 		Model:           pickString(*model, config.AgentModel),
 		Models:          sah.MergeAgentModels(config.AgentModels, agentModels),
 		Interval:        pollInterval,
@@ -308,6 +317,7 @@ func daemonInstallCmd(args []string) error {
 	if err := applyDaemonInstallOptions(&config, options); err != nil {
 		return err
 	}
+	config.AgentBinaryPaths = sah.CaptureInstalledAgentBinaryPaths()
 
 	if strings.TrimSpace(config.APIKey) == "" {
 		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
@@ -328,7 +338,7 @@ func daemonInstallCmd(args []string) error {
 	fmt.Println("Installed and started SCIENCE@home launchd agent.")
 	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
 	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
-	fmt.Println("Captured PATH and HOME from the current shell for launchd. Re-run `sah daemon install` after changing agent install paths.")
+	fmt.Println("Captured PATH, HOME, and installed agent binary paths for launchd. Re-run `sah daemon install` after changing agent install paths.")
 	return nil
 }
 
@@ -368,14 +378,18 @@ func applyDaemonInstallOptions(config *sah.Config, options daemonInstallOptions)
 		config.RotateInstalled = false
 	}
 	if pool := sah.ParseAgentList(options.agents); len(pool) > 0 {
-		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{Agents: pool}); err != nil {
+		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
+			Agents: pool,
+		}); err != nil {
 			return err
 		}
 		config.AgentPool = pool
 		config.RotateInstalled = false
 	}
 	if options.rotateInstalled {
-		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{RotateInstalled: true}); err != nil {
+		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
+			RotateInstalled: true,
+		}); err != nil {
 			return err
 		}
 		config.AgentPool = nil

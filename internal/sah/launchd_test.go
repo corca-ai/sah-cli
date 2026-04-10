@@ -11,6 +11,7 @@ func TestRenderLaunchAgentPlistIncludesEnvironmentAndWorkingDirectory(t *testing
 		DefaultLaunchdCommand,
 		"/tmp/sah-stdout.log",
 		"/tmp/sah-stderr.log",
+		"/Users/tester/Library/Application Support/sah",
 		map[string]string{
 			"HOME": "/Users/tester",
 			"PATH": "/opt/homebrew/bin:/usr/bin:/bin",
@@ -23,7 +24,7 @@ func TestRenderLaunchAgentPlistIncludesEnvironmentAndWorkingDirectory(t *testing
 	assertContains(t, plist, "<key>PATH</key>")
 	assertContains(t, plist, "<string>/opt/homebrew/bin:/usr/bin:/bin</string>")
 	assertContains(t, plist, "<key>WorkingDirectory</key>")
-	assertContains(t, plist, "<string>/Users/")
+	assertContains(t, plist, "<string>/Users/tester/Library/Application Support/sah</string>")
 }
 
 func TestRenderLaunchAgentPlistEscapesXML(t *testing.T) {
@@ -32,6 +33,7 @@ func TestRenderLaunchAgentPlistEscapesXML(t *testing.T) {
 		DefaultLaunchdCommand,
 		"/tmp/stdout&1.log",
 		"/tmp/stderr<1>.log",
+		"/Users/alice&bob/Library/Application Support/sah",
 		map[string]string{
 			"HOME": "/Users/alice&bob",
 			"PATH": "/opt/homebrew/bin:/usr/bin:/bin",
@@ -42,6 +44,7 @@ func TestRenderLaunchAgentPlistEscapesXML(t *testing.T) {
 	assertContains(t, plist, "/tmp/stdout&amp;1.log")
 	assertContains(t, plist, "/tmp/stderr&lt;1&gt;.log")
 	assertContains(t, plist, "/Users/alice&amp;bob")
+	assertContains(t, plist, "/Users/alice&amp;bob/Library/Application Support/sah")
 }
 
 func TestLaunchAgentEnvironmentFallsBackToDefaultPath(t *testing.T) {

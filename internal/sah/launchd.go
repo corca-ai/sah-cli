@@ -13,6 +13,9 @@ import (
 const defaultLaunchdPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 func InstallLaunchAgent(paths Paths, executable string) error {
+	if err := os.MkdirAll(paths.ConfigDir, 0o755); err != nil {
+		return fmt.Errorf("create config dir: %w", err)
+	}
 	if err := os.MkdirAll(paths.LaunchAgentsDir, 0o755); err != nil {
 		return fmt.Errorf("create launch agents dir: %w", err)
 	}
@@ -25,6 +28,7 @@ func InstallLaunchAgent(paths Paths, executable string) error {
 		DefaultLaunchdCommand,
 		paths.LaunchAgentStdout,
 		paths.LaunchAgentStderr,
+		paths.ConfigDir,
 		launchAgentEnvironment(),
 	)
 
@@ -44,6 +48,7 @@ func renderLaunchAgentPlist(
 	command string,
 	stdoutPath string,
 	stderrPath string,
+	workingDirectory string,
 	environment map[string]string,
 ) string {
 	environmentBlock := renderPlistEnvironment(environment)
@@ -77,7 +82,7 @@ func renderLaunchAgentPlist(
 		plistEscape(executable),
 		plistEscape(command),
 		environmentBlock,
-		plistEscape(launchAgentWorkingDirectory()),
+		plistEscape(resolveLaunchAgentWorkingDirectory(workingDirectory)),
 		plistEscape(stdoutPath),
 		plistEscape(stderrPath),
 	)
@@ -107,7 +112,11 @@ func launchAgentEnvironment() map[string]string {
 	return environment
 }
 
-func launchAgentWorkingDirectory() string {
+func resolveLaunchAgentWorkingDirectory(path string) string {
+	if strings.TrimSpace(path) != "" {
+		return path
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err == nil && strings.TrimSpace(homeDir) != "" {
 		return homeDir

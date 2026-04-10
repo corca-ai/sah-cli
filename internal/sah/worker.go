@@ -14,6 +14,7 @@ type WorkerOptions struct {
 	Agent           string
 	Agents          []string
 	RotateInstalled bool
+	BinaryPaths     map[string]string
 	Model           string
 	Models          map[string]string
 	Interval        time.Duration
@@ -188,10 +189,11 @@ func runWorkerCycle(
 	)
 
 	result, solveErr := SolveAssignment(ctx, *assignment, AgentRunOptions{
-		Agent:   agent.Name,
-		Model:   options.Model,
-		Models:  options.Models,
-		Timeout: options.Timeout,
+		Agent:       agent.Name,
+		Model:       options.Model,
+		Models:      options.Models,
+		BinaryPaths: options.BinaryPaths,
+		Timeout:     options.Timeout,
 	})
 	if solveErr != nil {
 		var abortErr *AbortError

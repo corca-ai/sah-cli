@@ -20,15 +20,16 @@ const (
 )
 
 type Config struct {
-	BaseURL         string            `json:"base_url"`
-	APIKey          string            `json:"api_key,omitempty"`
-	DefaultAgent    string            `json:"default_agent,omitempty"`
-	AgentPool       []string          `json:"agent_pool,omitempty"`
-	RotateInstalled bool              `json:"rotate_installed,omitempty"`
-	PollInterval    string            `json:"poll_interval,omitempty"`
-	AgentModel      string            `json:"agent_model,omitempty"`
-	AgentModels     map[string]string `json:"agent_models,omitempty"`
-	AgentTimeout    string            `json:"agent_timeout,omitempty"`
+	BaseURL          string            `json:"base_url"`
+	APIKey           string            `json:"api_key,omitempty"`
+	DefaultAgent     string            `json:"default_agent,omitempty"`
+	AgentPool        []string          `json:"agent_pool,omitempty"`
+	RotateInstalled  bool              `json:"rotate_installed,omitempty"`
+	AgentBinaryPaths map[string]string `json:"agent_binary_paths,omitempty"`
+	PollInterval     string            `json:"poll_interval,omitempty"`
+	AgentModel       string            `json:"agent_model,omitempty"`
+	AgentModels      map[string]string `json:"agent_models,omitempty"`
+	AgentTimeout     string            `json:"agent_timeout,omitempty"`
 }
 
 type Paths struct {
@@ -143,6 +144,7 @@ func normalizeConfig(config Config) Config {
 		config.DefaultAgent = normalizeAgentName(config.DefaultAgent)
 	}
 	config.AgentPool = normalizeAgentPool(config.AgentPool)
+	config.AgentBinaryPaths = normalizeAgentBinaryPaths(config.AgentBinaryPaths)
 	config.AgentModels = normalizeAgentModels(config.AgentModels)
 	if strings.TrimSpace(config.PollInterval) == "" {
 		config.PollInterval = defaults.PollInterval
@@ -198,6 +200,26 @@ func normalizeAgentModels(models map[string]string) map[string]string {
 			continue
 		}
 		normalized[name] = model
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeAgentBinaryPaths(paths map[string]string) map[string]string {
+	if len(paths) == 0 {
+		return nil
+	}
+
+	normalized := make(map[string]string, len(paths))
+	for key, value := range paths {
+		name := normalizeAgentName(key)
+		path := filepath.Clean(strings.TrimSpace(value))
+		if name == "" || path == "." || path == "" {
+			continue
+		}
+		normalized[name] = path
 	}
 	if len(normalized) == 0 {
 		return nil

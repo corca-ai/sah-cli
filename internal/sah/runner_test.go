@@ -1,6 +1,11 @@
 package sah
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseCodexStructuredOutput(t *testing.T) {
 	raw := `{"type":"thread.started","thread_id":"abc"}
@@ -48,5 +53,41 @@ func TestParseClaudeStructuredOutput(t *testing.T) {
 	}
 	if output.Usage.InputTokens != 12 || output.Usage.OutputTokens != 4 || output.Usage.CachedTokens != 3 {
 		t.Fatalf("unexpected usage: %#v", output.Usage)
+	}
+}
+
+func TestResolveAgentBinaryPathUsesConfiguredPath(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "codex")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	resolved, err := resolveAgentBinaryPath(SupportedAgents[0], map[string]string{"codex": path})
+	if err != nil {
+		t.Fatalf("resolveAgentBinaryPath returned error: %v", err)
+	}
+	if resolved != path {
+		t.Fatalf("expected %q, got %q", path, resolved)
+	}
+}
+
+func TestResolveAgentBinaryPathDoesNotFallbackFromConfiguredPath(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+
+	fallback := filepath.Join(dir, "codex")
+	if err := os.WriteFile(fallback, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fallback executable: %v", err)
+	}
+
+	_, err := resolveAgentBinaryPath(SupportedAgents[0], map[string]string{"codex": filepath.Join(dir, "missing-codex")})
+	if err == nil {
+		t.Fatal("expected error for missing configured path")
+	}
+	if !strings.Contains(err.Error(), "re-run `sah daemon install`") {
+		t.Fatalf("expected daemon reinstall guidance, got %v", err)
 	}
 }
