@@ -62,6 +62,7 @@ The hook runs:
 - `go mod verify`
 - `go mod tidy` and checks that it does not rewrite `go.mod` or `go.sum`
 - `CGO_ENABLED=1 go test -race ./...`
+- `golangci-lint config verify`
 - `golangci-lint run ./...`
 - `go build -o .tmp-bin/sah ./cmd/sah`
 

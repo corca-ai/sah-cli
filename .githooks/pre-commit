@@ -36,6 +36,7 @@ echo "Running tests..."
 CGO_ENABLED=1 go test -race ./...
 
 echo "Running lint..."
+golangci-lint config verify
 golangci-lint run ./...
 
 echo "Building sah..."
