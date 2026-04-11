@@ -7,9 +7,22 @@ type Assignment struct {
 	TaskType           string                 `json:"task_type"`
 	TaskKey            string                 `json:"task_key"`
 	Payload            map[string]any         `json:"payload"`
+	ProtocolVersion    string                 `json:"protocol_version,omitempty"`
 	InstructionVersion string                 `json:"instruction_version"`
 	SchemaVersion      string                 `json:"schema_version"`
 	Instructions       AssignmentInstructions `json:"instructions"`
+	Links              AssignmentLinks        `json:"_links,omitempty"`
+}
+
+type AssignmentLink struct {
+	Href        string `json:"href"`
+	Method      string `json:"method,omitempty"`
+	ContentType string `json:"content_type,omitempty"`
+}
+
+type AssignmentLinks struct {
+	Submit  AssignmentLink `json:"submit"`
+	Release AssignmentLink `json:"release"`
 }
 
 type AssignmentInstructions struct {

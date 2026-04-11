@@ -9,27 +9,28 @@ import (
 )
 
 type fakeWorkerClient struct {
-	getTaskFunc            func(context.Context, string) (*Assignment, error)
-	submitContributionFunc func(context.Context, SubmitContributionRequest) (*SubmitContributionResponse, error)
-	releaseAssignmentFunc  func(context.Context, int64) error
+	getTaskFunc             func(context.Context, string) (*Assignment, error)
+	submitAssignmentFunc    func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error)
+	releaseOpenAssignmentFn func(context.Context, Assignment) error
 }
 
 func (client fakeWorkerClient) GetTask(ctx context.Context, taskType string) (*Assignment, error) {
 	return client.getTaskFunc(ctx, taskType)
 }
 
-func (client fakeWorkerClient) SubmitContribution(
+func (client fakeWorkerClient) SubmitAssignment(
 	ctx context.Context,
-	request SubmitContributionRequest,
+	assignment Assignment,
+	payload map[string]any,
 ) (*SubmitContributionResponse, error) {
-	return client.submitContributionFunc(ctx, request)
+	return client.submitAssignmentFunc(ctx, assignment, payload)
 }
 
-func (client fakeWorkerClient) ReleaseAssignment(ctx context.Context, assignmentID int64) error {
-	if client.releaseAssignmentFunc == nil {
+func (client fakeWorkerClient) ReleaseOpenAssignment(ctx context.Context, assignment Assignment) error {
+	if client.releaseOpenAssignmentFn == nil {
 		return nil
 	}
-	return client.releaseAssignmentFunc(ctx, assignmentID)
+	return client.releaseOpenAssignmentFn(ctx, assignment)
 }
 
 func TestHandleWorkerCycleErrorPropagatesContextCanceledWithoutLogging(t *testing.T) {
@@ -80,12 +81,12 @@ func TestRunWorkerCycleReleasesAssignmentAfterAbort(t *testing.T) {
 				Payload:      map[string]any{"corpus_id": 42},
 			}, nil
 		},
-		submitContributionFunc: func(context.Context, SubmitContributionRequest) (*SubmitContributionResponse, error) {
-			t.Fatal("SubmitContribution should not be called after abort")
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called after abort")
 			return nil, nil
 		},
-		releaseAssignmentFunc: func(_ context.Context, assignmentID int64) error {
-			released = append(released, assignmentID)
+		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
+			released = append(released, assignment.AssignmentID)
 			return nil
 		},
 	}
@@ -132,12 +133,12 @@ func TestRunWorkerCycleReleasesAssignmentAfterLocalFailure(t *testing.T) {
 				Payload:      map[string]any{"title": "Paper"},
 			}, nil
 		},
-		submitContributionFunc: func(context.Context, SubmitContributionRequest) (*SubmitContributionResponse, error) {
-			t.Fatal("SubmitContribution should not be called after local failure")
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called after local failure")
 			return nil, nil
 		},
-		releaseAssignmentFunc: func(_ context.Context, assignmentID int64) error {
-			released = append(released, assignmentID)
+		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
+			released = append(released, assignment.AssignmentID)
 			return nil
 		},
 	}
@@ -164,8 +165,8 @@ func TestRunWorkerCycleUsesClearOpenAssignmentMessage(t *testing.T) {
 				Message:    "Too many open assignments. Submit completed work or wait for older assignments to expire.",
 			}
 		},
-		submitContributionFunc: func(context.Context, SubmitContributionRequest) (*SubmitContributionResponse, error) {
-			t.Fatal("SubmitContribution should not be called when task fetch is rate-limited")
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called when task fetch is rate-limited")
 			return nil, nil
 		},
 	}

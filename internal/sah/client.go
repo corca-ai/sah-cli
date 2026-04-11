@@ -54,9 +54,13 @@ func (client *Client) GetTask(ctx context.Context, taskType string) (*Assignment
 	}
 
 	var assignment Assignment
-	if err := client.doJSON(ctx, http.MethodGet, path, nil, &assignment); err != nil {
+	headers, err := client.doJSONWithHeaders(ctx, http.MethodGet, path, nil, &assignment)
+	if err != nil {
 		return nil, err
 	}
+	// Prefer explicit body links, but also accept HTTP Link headers so the
+	// server can evolve the protocol without forcing a CLI release.
+	mergeAssignmentLinks(&assignment, headers)
 	return &assignment, nil
 }
 
@@ -71,9 +75,52 @@ func (client *Client) SubmitContribution(
 	return &response, nil
 }
 
+func (client *Client) SubmitAssignment(
+	ctx context.Context,
+	assignment Assignment,
+	payload map[string]any,
+) (*SubmitContributionResponse, error) {
+	if href := strings.TrimSpace(assignment.Links.Submit.Href); href != "" {
+		// Assignment-scoped submission already identifies the task on the server,
+		// so newer protocol versions only need the payload object here.
+		request := map[string]any{
+			"payload": payload,
+		}
+		var response SubmitContributionResponse
+		if err := client.doJSON(
+			ctx,
+			linkMethodOrDefault(assignment.Links.Submit.Method, http.MethodPost),
+			href,
+			request,
+			&response,
+		); err != nil {
+			return nil, err
+		}
+		return &response, nil
+	}
+	return client.SubmitContribution(ctx, SubmitContributionRequest{
+		AssignmentID: assignment.AssignmentID,
+		TaskType:     assignment.TaskType,
+		Payload:      payload,
+	})
+}
+
 func (client *Client) ReleaseAssignment(ctx context.Context, assignmentID int64) error {
 	path := fmt.Sprintf("/s@h/assignments/%d/release", assignmentID)
 	return client.doJSON(ctx, http.MethodPost, path, nil, nil)
+}
+
+func (client *Client) ReleaseOpenAssignment(ctx context.Context, assignment Assignment) error {
+	if href := strings.TrimSpace(assignment.Links.Release.Href); href != "" {
+		return client.doJSON(
+			ctx,
+			linkMethodOrDefault(assignment.Links.Release.Method, http.MethodPost),
+			href,
+			nil,
+			nil,
+		)
+	}
+	return client.ReleaseAssignment(ctx, assignment.AssignmentID)
 }
 
 func (client *Client) GetMe(ctx context.Context) (*MeResponse, error) {
@@ -126,49 +173,62 @@ func (client *Client) doJSON(
 	body any,
 	out any,
 ) error {
-	endpoint, err := url.Parse(client.baseURL + path)
+	_, err := client.doJSONWithHeaders(ctx, method, path, body, out)
+	return err
+}
+
+func (client *Client) doJSONWithHeaders(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+	out any,
+) (http.Header, error) {
+	endpoint, err := client.resolveEndpoint(path)
 	if err != nil {
-		return fmt.Errorf("build request url: %w", err)
+		return nil, fmt.Errorf("build request url: %w", err)
 	}
 
 	var requestBody io.Reader
 	if body != nil {
 		payload, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode request body: %w", err)
+			return nil, fmt.Errorf("encode request body: %w", err)
 		}
 		requestBody = bytes.NewReader(payload)
 	}
 
 	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), requestBody)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
 	}
+	request.Header.Set("Accept", "application/json")
 	if client.apiKey != "" {
 		request.Header.Set("X-API-Key", client.apiKey)
 	}
 
 	response, err := client.httpClient.Do(request)
 	if err != nil {
-		return fmt.Errorf("perform request: %w", err)
+		return nil, fmt.Errorf("perform request: %w", err)
 	}
 	defer func() {
 		_ = response.Body.Close()
 	}()
 
+	headers := response.Header.Clone()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return decodeStatusError(response)
+		return nil, decodeStatusError(response)
 	}
 	if out == nil || response.StatusCode == http.StatusNoContent {
-		return nil
+		return headers, nil
 	}
 	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return nil
+	return headers, nil
 }
 
 func decodeStatusError(response *http.Response) error {
@@ -202,6 +262,96 @@ func decodeStatusError(response *http.Response) error {
 func IsStatus(err error, statusCode int) bool {
 	var statusErr *StatusError
 	return errors.As(err, &statusErr) && statusErr.StatusCode == statusCode
+}
+
+func (client *Client) resolveEndpoint(path string) (*url.URL, error) {
+	baseURL, err := url.Parse(client.baseURL)
+	if err != nil {
+		return nil, err
+	}
+	ref, err := url.Parse(strings.TrimSpace(path))
+	if err != nil {
+		return nil, err
+	}
+	return baseURL.ResolveReference(ref), nil
+}
+
+func mergeAssignmentLinks(assignment *Assignment, headers http.Header) {
+	if assignment == nil {
+		return
+	}
+
+	// Header-derived links only fill gaps. Body links remain authoritative when
+	// both representations are present.
+	for _, raw := range headers.Values("Link") {
+		for _, link := range parseLinkHeader(raw) {
+			switch link.rel {
+			case "submit":
+				if strings.TrimSpace(assignment.Links.Submit.Href) == "" {
+					assignment.Links.Submit.Href = link.href
+				}
+			case "release":
+				if strings.TrimSpace(assignment.Links.Release.Href) == "" {
+					assignment.Links.Release.Href = link.href
+				}
+			}
+		}
+	}
+}
+
+type parsedLink struct {
+	rel  string
+	href string
+}
+
+func parseLinkHeader(raw string) []parsedLink {
+	parts := strings.Split(raw, ",")
+	links := make([]parsedLink, 0, len(parts))
+	for _, part := range parts {
+		segment := strings.TrimSpace(part)
+		if !strings.HasPrefix(segment, "<") {
+			continue
+		}
+		end := strings.Index(segment, ">")
+		if end <= 1 {
+			continue
+		}
+
+		href := strings.TrimSpace(segment[1:end])
+		if href == "" {
+			continue
+		}
+
+		var rel string
+		for _, param := range strings.Split(segment[end+1:], ";") {
+			key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
+			if !ok || !strings.EqualFold(strings.TrimSpace(key), "rel") {
+				continue
+			}
+			for _, candidate := range strings.Fields(strings.Trim(value, `"'`)) {
+				if candidate == "submit" || candidate == "release" {
+					rel = candidate
+					break
+				}
+			}
+			if rel != "" {
+				break
+			}
+		}
+		if rel == "" {
+			continue
+		}
+		links = append(links, parsedLink{rel: rel, href: href})
+	}
+	return links
+}
+
+func linkMethodOrDefault(method string, fallback string) string {
+	normalized := strings.ToUpper(strings.TrimSpace(method))
+	if normalized == "" {
+		return fallback
+	}
+	return normalized
 }
 
 func statusMessage(err error) string {

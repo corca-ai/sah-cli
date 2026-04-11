@@ -17,11 +17,14 @@ The browser never receives the raw contributor API key. The local CLI proves pos
 ## Worker Loop
 
 - `sah` calls `GET /s@h/tasks` with `X-API-Key`.
+- The assignment response can include a protocol version plus `_links.submit` and `_links.release`, and the same submit/release relations can also be exposed through the HTTP `Link` header.
 - It builds a task-only prompt from the returned assignment payload and instructions.
 - It runs one of the supported local agent CLIs: `codex`, `gemini`, or `claude`.
 - The agent receives no API key and runs in an empty temporary working directory.
-- The CLI parses the agent stdout as JSON and submits it through `POST /s@h/contributions`.
+- The CLI parses the agent stdout as JSON and follows the assignment-scoped submit link when present, falling back to the legacy contribution endpoint when it is not.
 - If the local agent aborts or fails before submission, `sah` releases the assignment immediately so the API key does not stay pinned at the open-assignment limit until expiry.
+
+This keeps the CLI forward-compatible with new task families. As long as the server still returns one assignment payload plus one submission schema, the CLI does not need to know new task-specific endpoints ahead of time.
 
 ## Commands
 

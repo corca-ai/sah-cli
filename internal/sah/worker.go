@@ -31,11 +31,12 @@ type WorkerCycleResult struct {
 
 type workerClient interface {
 	GetTask(ctx context.Context, taskType string) (*Assignment, error)
-	SubmitContribution(
+	SubmitAssignment(
 		ctx context.Context,
-		request SubmitContributionRequest,
+		assignment Assignment,
+		payload map[string]any,
 	) (*SubmitContributionResponse, error)
-	ReleaseAssignment(ctx context.Context, assignmentID int64) error
+	ReleaseOpenAssignment(ctx context.Context, assignment Assignment) error
 }
 
 var solveAssignment = SolveAssignment
@@ -209,7 +210,7 @@ func runWorkerCycle(
 		Timeout:     options.Timeout,
 	})
 	if solveErr != nil {
-		releaseAssignmentOnFailure(client, assignment.AssignmentID, options)
+		releaseAssignmentOnFailure(client, *assignment, options)
 		var abortErr *AbortError
 		if errors.As(solveErr, &abortErr) {
 			logLine(options.Output, "agent skipped assignment %d: %s", assignment.AssignmentID, abortErr.Reason)
@@ -223,11 +224,7 @@ func runWorkerCycle(
 		}
 	}
 
-	response, err := client.SubmitContribution(ctx, SubmitContributionRequest{
-		AssignmentID: assignment.AssignmentID,
-		TaskType:     assignment.TaskType,
-		Payload:      result.Payload,
-	})
+	response, err := client.SubmitAssignment(ctx, *assignment, result.Payload)
 	if err != nil {
 		return WorkerCycleResult{AgentHealthy: true}, fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
 	}
@@ -236,22 +233,22 @@ func runWorkerCycle(
 	return WorkerCycleResult{AgentHealthy: true}, nil
 }
 
-func releaseAssignmentOnFailure(client workerClient, assignmentID int64, options WorkerOptions) {
-	if client == nil || assignmentID == 0 {
+func releaseAssignmentOnFailure(client workerClient, assignment Assignment, options WorkerOptions) {
+	if client == nil || assignment.AssignmentID == 0 {
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), releaseAssignmentTimeout)
 	defer cancel()
 
-	err := client.ReleaseAssignment(ctx, assignmentID)
+	err := client.ReleaseOpenAssignment(ctx, assignment)
 	switch {
 	case err == nil:
 		return
 	case IsStatus(err, http.StatusNotFound), IsStatus(err, http.StatusConflict):
 		return
 	default:
-		logLine(options.ErrorOutput, "failed to release assignment %d: %v", assignmentID, err)
+		logLine(options.ErrorOutput, "failed to release assignment %d: %v", assignment.AssignmentID, err)
 	}
 }
 
