@@ -21,6 +21,7 @@ The browser never receives the raw contributor API key. The local CLI proves pos
 - It runs one of the supported local agent CLIs: `codex`, `gemini`, or `claude`.
 - The agent receives no API key and runs in an empty temporary working directory.
 - The CLI parses the agent stdout as JSON and submits it through `POST /s@h/contributions`.
+- If the local agent aborts or fails before submission, `sah` releases the assignment immediately so the API key does not stay pinned at the open-assignment limit until expiry.
 
 ## Commands
 

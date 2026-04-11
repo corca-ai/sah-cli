@@ -71,6 +71,11 @@ func (client *Client) SubmitContribution(
 	return &response, nil
 }
 
+func (client *Client) ReleaseAssignment(ctx context.Context, assignmentID int64) error {
+	path := fmt.Sprintf("/s@h/assignments/%d/release", assignmentID)
+	return client.doJSON(ctx, http.MethodPost, path, nil, nil)
+}
+
 func (client *Client) GetMe(ctx context.Context) (*MeResponse, error) {
 	var response MeResponse
 	if err := client.doJSON(ctx, http.MethodGet, "/s@h/me", nil, &response); err != nil {
@@ -197,4 +202,12 @@ func decodeStatusError(response *http.Response) error {
 func IsStatus(err error, statusCode int) bool {
 	var statusErr *StatusError
 	return errors.As(err, &statusErr) && statusErr.StatusCode == statusCode
+}
+
+func statusMessage(err error) string {
+	var statusErr *StatusError
+	if !errors.As(err, &statusErr) {
+		return ""
+	}
+	return strings.TrimSpace(statusErr.Message)
 }

@@ -29,6 +29,19 @@ type WorkerCycleResult struct {
 	AgentHealthy bool
 }
 
+type workerClient interface {
+	GetTask(ctx context.Context, taskType string) (*Assignment, error)
+	SubmitContribution(
+		ctx context.Context,
+		request SubmitContributionRequest,
+	) (*SubmitContributionResponse, error)
+	ReleaseAssignment(ctx context.Context, assignmentID int64) error
+}
+
+var solveAssignment = SolveAssignment
+
+const releaseAssignmentTimeout = 10 * time.Second
+
 func RunWorker(ctx context.Context, config Config, options WorkerOptions) error {
 	client := NewClient(config.BaseURL, config.APIKey)
 
@@ -163,7 +176,7 @@ func normalizeContextCancel(err error) error {
 
 func runWorkerCycle(
 	ctx context.Context,
-	client *Client,
+	client workerClient,
 	agent AgentSpec,
 	options WorkerOptions,
 ) (WorkerCycleResult, error) {
@@ -173,7 +186,7 @@ func runWorkerCycle(
 		logLine(options.Output, "no task available")
 		return WorkerCycleResult{}, nil
 	case IsStatus(err, http.StatusTooManyRequests):
-		logLine(options.Output, "too many pending assignments; waiting for reviews")
+		logLine(options.Output, "%s", openAssignmentLimitMessage(err))
 		return WorkerCycleResult{}, nil
 	case err != nil:
 		return WorkerCycleResult{}, err
@@ -188,7 +201,7 @@ func runWorkerCycle(
 		agent.Name,
 	)
 
-	result, solveErr := SolveAssignment(ctx, *assignment, AgentRunOptions{
+	result, solveErr := solveAssignment(ctx, *assignment, AgentRunOptions{
 		Agent:       agent.Name,
 		Model:       options.Model,
 		Models:      options.Models,
@@ -196,12 +209,14 @@ func runWorkerCycle(
 		Timeout:     options.Timeout,
 	})
 	if solveErr != nil {
+		releaseAssignmentOnFailure(client, assignment.AssignmentID, options)
 		var abortErr *AbortError
 		if errors.As(solveErr, &abortErr) {
 			logLine(options.Output, "agent skipped assignment %d: %s", assignment.AssignmentID, abortErr.Reason)
-			solveErr = nil
-			return WorkerCycleResult{AgentHealthy: true}, solveErr
+			logLine(options.Output, "released assignment %d without submission", assignment.AssignmentID)
+			return WorkerCycleResult{AgentHealthy: true}, nil
 		}
+		logLine(options.Output, "released assignment %d after local failure", assignment.AssignmentID)
 		return WorkerCycleResult{}, &AgentFailure{
 			Agent: agent,
 			Err:   fmt.Errorf("solve assignment %d: %w", assignment.AssignmentID, solveErr),
@@ -219,6 +234,32 @@ func runWorkerCycle(
 
 	PrintCycleSummary(options.Output, *assignment, result, response)
 	return WorkerCycleResult{AgentHealthy: true}, nil
+}
+
+func releaseAssignmentOnFailure(client workerClient, assignmentID int64, options WorkerOptions) {
+	if client == nil || assignmentID == 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), releaseAssignmentTimeout)
+	defer cancel()
+
+	err := client.ReleaseAssignment(ctx, assignmentID)
+	switch {
+	case err == nil:
+		return
+	case IsStatus(err, http.StatusNotFound), IsStatus(err, http.StatusConflict):
+		return
+	default:
+		logLine(options.ErrorOutput, "failed to release assignment %d: %v", assignmentID, err)
+	}
+}
+
+func openAssignmentLimitMessage(err error) string {
+	if message := statusMessage(err); message != "" {
+		return message
+	}
+	return "Too many open assignments. Submit completed work or wait for older assignments to expire."
 }
 
 func logLine(writer io.Writer, format string, args ...any) {
