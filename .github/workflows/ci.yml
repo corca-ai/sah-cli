@@ -25,4 +25,4 @@ jobs:
       - name: Vulnerability scan
         run: go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
 
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
