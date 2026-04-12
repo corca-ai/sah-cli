@@ -72,7 +72,7 @@ Commands:
 Examples:
   sah auth login
   sah run --rotate-installed
-  sah run --agents codex,gemini,claude --models codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet
+  sah run --agents codex,gemini,claude --models codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet
   sah daemon install --agents codex,claude --interval 30m
   sah me
 `)
@@ -173,7 +173,7 @@ func runCmd(args []string) error {
 	agents := fs.String("agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude")
 	rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
 	model := fs.String("model", "", "Optional model override passed to the agent CLI")
-	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
+	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet")
 	interval := fs.String("interval", "", "Polling interval")
 	timeout := fs.String("timeout", "", "Per-assignment agent timeout")
 	taskType := fs.String("task-type", "", "Optional task type filter")
@@ -351,7 +351,7 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	fs.StringVar(&options.agents, "agents", "", "Comma-separated round-robin agent order for the daemon")
 	fs.BoolVar(&options.rotateInstalled, "rotate-installed", false, "Rotate through every installed supported agent CLI")
 	fs.StringVar(&options.model, "model", "", "Default model override")
-	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini3-flash,claude=sonnet")
+	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet")
 	fs.StringVar(&options.interval, "interval", "", "Default polling interval")
 	fs.StringVar(&options.timeout, "timeout", "", "Default per-assignment timeout")
 	fs.StringVar(&options.baseURL, "base-url", "", "SCIENCE@home base URL")

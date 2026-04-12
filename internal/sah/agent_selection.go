@@ -140,11 +140,29 @@ func MergeAgentModels(base map[string]string, overrides map[string]string) map[s
 	return merged
 }
 
+// DefaultAgentModels is the per-agent model used when neither --models nor
+// --model is supplied. Keep these in sync with what each upstream CLI actually
+// accepts today: Gemini CLI 0.37.x only exposes `gemini-3-flash-base` (and
+// friends) -- `gemini3-flash` / `gemini-3-flash` are NOT valid ids and cause
+// ModelNotFoundError.
+var DefaultAgentModels = map[string]string{
+	"codex":  "gpt-5.4-mini",
+	"gemini": "gemini-3-flash-base",
+	"claude": "sonnet",
+}
+
 func ModelForAgent(agentName string, fallback string, overrides map[string]string) string {
-	if model, ok := normalizeAgentModels(overrides)[normalizeAgentName(agentName)]; ok {
+	name := normalizeAgentName(agentName)
+	if model, ok := normalizeAgentModels(overrides)[name]; ok {
 		return model
 	}
-	return strings.TrimSpace(fallback)
+	if trimmed := strings.TrimSpace(fallback); trimmed != "" {
+		return trimmed
+	}
+	if model, ok := DefaultAgentModels[name]; ok {
+		return model
+	}
+	return ""
 }
 
 func DescribeAgentMode(config Config, options WorkerOptions) string {
