@@ -57,6 +57,22 @@ func TestParseClaudeStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestParseQwenStructuredOutput(t *testing.T) {
+	raw := `{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"internal"},{"type":"text","text":"{\"ok\":true}"}]}}
+{"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":21,"cache_read_input_tokens":4,"output_tokens":6,"total_tokens":27}}`
+
+	output, err := parseQwenStructuredOutput(raw)
+	if err != nil {
+		t.Fatalf("parseQwenStructuredOutput returned error: %v", err)
+	}
+	if output.Text != `{"ok":true}` {
+		t.Fatalf("unexpected text: %q", output.Text)
+	}
+	if output.Usage.InputTokens != 21 || output.Usage.OutputTokens != 6 || output.Usage.CachedTokens != 4 || output.Usage.TotalTokens != 27 {
+		t.Fatalf("unexpected usage: %#v", output.Usage)
+	}
+}
+
 func TestResolveAgentBinaryPathUsesConfiguredPath(t *testing.T) {
 	t.Setenv("PATH", "")
 
@@ -120,5 +136,38 @@ func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
 	}
 	if !strings.Contains(args, "--disable-slash-commands") {
 		t.Fatalf("expected claude args to include --disable-slash-commands, got %q", args)
+	}
+}
+
+func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "qwen")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, useStdin, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "qwen", Binary: "qwen"},
+		"",
+		t.TempDir(),
+		`{"ok":true}`,
+		map[string]string{"qwen": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+	if useStdin {
+		t.Fatal("expected qwen prompt to be passed as an argument")
+	}
+
+	args := strings.Join(command.Args[1:], " ")
+	if !strings.Contains(args, "--output-format stream-json") {
+		t.Fatalf("expected qwen args to include stream-json output, got %q", args)
+	}
+	if !strings.Contains(args, "--approval-mode plan") {
+		t.Fatalf("expected qwen args to include plan mode, got %q", args)
+	}
+	if !strings.Contains(args, "--sandbox") {
+		t.Fatalf("expected qwen args to enable sandboxing, got %q", args)
 	}
 }

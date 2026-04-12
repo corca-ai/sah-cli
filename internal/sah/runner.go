@@ -51,6 +51,7 @@ var SupportedAgents = []AgentSpec{
 	{Name: "codex", Binary: "codex", Description: "OpenAI Codex CLI"},
 	{Name: "gemini", Binary: "gemini", Description: "Google Gemini CLI"},
 	{Name: "claude", Binary: "claude", Description: "Anthropic Claude Code"},
+	{Name: "qwen", Binary: "qwen", Description: "Qwen Code CLI"},
 }
 
 func InstalledAgents() []AgentStatus {
@@ -253,6 +254,13 @@ func buildAgentCommand(
 			"--no-session-persistence",
 			prompt,
 		}
+	case "qwen":
+		args = []string{
+			"--prompt", prompt,
+			"--sandbox",
+			"--approval-mode", "plan",
+			"--output-format", "stream-json",
+		}
 	default:
 		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
@@ -307,6 +315,8 @@ func parseStructuredOutput(agentName string, raw string) (*structuredAgentOutput
 		return parseGeminiStructuredOutput(raw)
 	case "claude":
 		return parseClaudeStructuredOutput(raw)
+	case "qwen":
+		return parseQwenStructuredOutput(raw)
 	default:
 		return nil, fmt.Errorf("unsupported agent %q", agentName)
 	}
@@ -369,7 +379,19 @@ func parseGeminiStructuredOutput(raw string) (*structuredAgentOutput, error) {
 }
 
 func parseClaudeStructuredOutput(raw string) (*structuredAgentOutput, error) {
+	return parseAssistantResultStructuredOutput(raw, parseClaudeUsage)
+}
+
+func parseQwenStructuredOutput(raw string) (*structuredAgentOutput, error) {
+	return parseAssistantResultStructuredOutput(raw, parseQwenUsage)
+}
+
+func parseAssistantResultStructuredOutput(
+	raw string,
+	parseUsage func(map[string]any) TokenUsage,
+) (*structuredAgentOutput, error) {
 	output := &structuredAgentOutput{}
+	var assistantText strings.Builder
 
 	if err := parseJSONLines(raw, func(event map[string]any) {
 		switch stringValue(event["type"]) {
@@ -377,21 +399,32 @@ func parseClaudeStructuredOutput(raw string) (*structuredAgentOutput, error) {
 			message := mapValue(event["message"])
 			content := arrayValue(message["content"])
 			for _, item := range content {
-				text := strings.TrimSpace(stringValue(mapValue(item)["text"]))
+				block := mapValue(item)
+				if stringValue(block["type"]) != "text" {
+					continue
+				}
+				text := strings.TrimSpace(stringValue(block["text"]))
 				if text != "" {
-					output.Text = text
+					if assistantText.Len() > 0 {
+						assistantText.WriteString("\n")
+					}
+					assistantText.WriteString(text)
 				}
 			}
 		case "result":
-			output.Usage = parseClaudeUsage(mapValue(event["usage"]))
+			output.Usage = parseUsage(mapValue(event["usage"]))
 			if boolValue(event["is_error"]) && output.AgentError == "" {
 				output.AgentError = strings.TrimSpace(stringValue(event["result"]))
+				if output.AgentError == "" {
+					output.AgentError = strings.TrimSpace(stringValue(event["subtype"]))
+				}
 			}
 		}
 	}); err != nil {
 		return nil, err
 	}
 
+	output.Text = strings.TrimSpace(assistantText.String())
 	return output, nil
 }
 
@@ -443,6 +476,20 @@ func parseClaudeUsage(usage map[string]any) TokenUsage {
 		OutputTokens: int64Value(usage["output_tokens"]),
 		CachedTokens: int64Value(usage["cache_read_input_tokens"]),
 		TotalTokens:  int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"]),
+	}
+}
+
+func parseQwenUsage(usage map[string]any) TokenUsage {
+	total := int64Value(usage["total_tokens"])
+	if total == 0 {
+		total = int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"])
+	}
+	return TokenUsage{
+		Available:    len(usage) > 0,
+		InputTokens:  int64Value(usage["input_tokens"]),
+		OutputTokens: int64Value(usage["output_tokens"]),
+		CachedTokens: int64Value(usage["cache_read_input_tokens"]),
+		TotalTokens:  total,
 	}
 }
 

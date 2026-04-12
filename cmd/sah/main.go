@@ -72,8 +72,8 @@ Commands:
 Examples:
   sah auth login
   sah run --rotate-installed
-  sah run --agents codex,gemini,claude --models codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet
-  sah daemon install --agents codex,claude --interval 30m
+  sah run --agents codex,gemini,claude,qwen --models codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet
+  sah daemon install --agents codex,claude,qwen --interval 30m
   sah me
 `)
 }
@@ -169,11 +169,11 @@ func authCmd(args []string) error {
 func runCmd(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
-	agent := fs.String("agent", "", "Agent CLI to use: codex, gemini, claude")
-	agents := fs.String("agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude")
+	agent := fs.String("agent", "", "Agent CLI to use: codex, gemini, claude, qwen")
+	agents := fs.String("agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude,qwen")
 	rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
 	model := fs.String("model", "", "Optional model override passed to the agent CLI")
-	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet")
+	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
 	interval := fs.String("interval", "", "Polling interval")
 	timeout := fs.String("timeout", "", "Per-assignment agent timeout")
 	taskType := fs.String("task-type", "", "Optional task type filter")
@@ -351,7 +351,7 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	fs.StringVar(&options.agents, "agents", "", "Comma-separated round-robin agent order for the daemon")
 	fs.BoolVar(&options.rotateInstalled, "rotate-installed", false, "Rotate through every installed supported agent CLI")
 	fs.StringVar(&options.model, "model", "", "Default model override")
-	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet")
+	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
 	fs.StringVar(&options.interval, "interval", "", "Default polling interval")
 	fs.StringVar(&options.timeout, "timeout", "", "Default per-assignment timeout")
 	fs.StringVar(&options.baseURL, "base-url", "", "SCIENCE@home base URL")
