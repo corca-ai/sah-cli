@@ -11,6 +11,10 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+      GOTOOLCHAIN: local
+      GOFLAGS: "-mod=readonly"
 
     steps:
       - uses: actions/checkout@v6
