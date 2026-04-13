@@ -47,7 +47,9 @@ This keeps the CLI forward-compatible with new task families. As long as the ser
 
 ## Daemon Mode
 
-`sah daemon install` writes a per-user service definition, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, and starts it immediately. On macOS the service manager is `launchd`. On Linux it is `systemd --user`. The daemon runs `sah run --daemon` from the saved config directory, so the service behavior is driven by persisted config defaults instead of the shell's working directory.
+`sah daemon install` writes a per-user service definition, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, and starts it immediately. On macOS the service manager is `launchd`. On Linux it is `systemd --user`. Unless the user explicitly pins agents with `--agent`, `--agents`, or `--rotate-installed`, the install path detects every installed supported agent CLI and persists daemon round-robin mode automatically. If none are installed, the command fails before the service starts and tells the user to inspect `sah agents`.
+
+The daemon runs `sah run --daemon` from the saved config directory, so the service behavior is driven by persisted config defaults instead of the shell's working directory.
 
 The worker writes its normal daemon output through an internal rotating logger. `daemon.stdout.log` rotates at 20 MB and `daemon.stderr.log` rotates at 10 MB, each keeping up to 5 older files before pruning the oldest backup. On Linux, `journalctl --user -u ai.borca.sah.service` is still useful for service-manager events around start and stop.
 

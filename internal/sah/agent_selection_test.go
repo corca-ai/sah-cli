@@ -1,6 +1,9 @@
 package sah
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseAgentList(t *testing.T) {
 	list := ParseAgentList("codex, gemini ,claude,qwen,codex")
@@ -50,5 +53,20 @@ func TestModelForAgentLeavesQwenUnsetWithoutOverrides(t *testing.T) {
 	model := ModelForAgent("qwen", "", nil)
 	if model != "" {
 		t.Fatalf("expected qwen to use upstream default model, got %q", model)
+	}
+}
+
+func TestResolveAgentPoolRotateInstalledReturnsFriendlyErrorWhenNothingDetected(t *testing.T) {
+	t.Setenv("PATH", "")
+
+	_, err := ResolveAgentPool(DefaultConfig(), WorkerOptions{RotateInstalled: true})
+	if err == nil {
+		t.Fatal("expected missing-agent error")
+	}
+	if !IsNoSupportedAgentCLI(err) {
+		t.Fatalf("expected IsNoSupportedAgentCLI to match, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "sah agents") {
+		t.Fatalf("expected detection guidance in error, got %v", err)
 	}
 }

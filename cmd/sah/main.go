@@ -364,10 +364,18 @@ func daemonInstallCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := applyDaemonInstallOptions(&config, options); err != nil {
-		return err
+	capturedBinaryPaths := sah.CaptureInstalledAgentBinaryPaths()
+	if err := applyDaemonInstallOptions(&config, options, capturedBinaryPaths); err != nil {
+		return daemonAgentSelectionError(err)
 	}
-	config.AgentBinaryPaths = sah.CaptureInstalledAgentBinaryPaths()
+	config.AgentBinaryPaths = capturedBinaryPaths
+
+	daemonPool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
+		BinaryPaths: capturedBinaryPaths,
+	})
+	if err != nil {
+		return daemonAgentSelectionError(err)
+	}
 
 	if strings.TrimSpace(config.APIKey) == "" {
 		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
@@ -386,6 +394,7 @@ func daemonInstallCmd(args []string) error {
 	}
 
 	fmt.Printf("Installed and started SCIENCE@home %s service.\n", sah.ServiceManagerName())
+	fmt.Printf("Daemon agent order: %s\n", joinAgentNames(daemonPool))
 	fmt.Printf("%s: %s\n", sah.ServiceDefinitionLabel(), sah.ServiceDefinitionPath(paths))
 	fmt.Printf("Daemon logs: %s and %s\n", paths.DaemonStdoutLog, paths.DaemonStderrLog)
 	if capture := sah.ServiceCaptureValue(paths); capture != "" {
@@ -418,30 +427,50 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	return options, nil
 }
 
-func applyDaemonInstallOptions(config *sah.Config, options daemonInstallOptions) error {
+func applyDaemonInstallOptions(
+	config *sah.Config,
+	options daemonInstallOptions,
+	binaryPaths map[string]string,
+) error {
 	if strings.TrimSpace(options.baseURL) != "" {
 		config.BaseURL = options.baseURL
 	}
+	selectionSpecified := false
 	if strings.TrimSpace(options.agent) != "" {
-		if _, err := sah.ResolveAgent(options.agent); err != nil {
+		if _, err := sah.ResolveAgentWithBinaryPaths(options.agent, binaryPaths); err != nil {
 			return err
 		}
 		config.DefaultAgent = options.agent
 		config.AgentPool = nil
 		config.RotateInstalled = false
+		selectionSpecified = true
 	}
 	if pool := sah.ParseAgentList(options.agents); len(pool) > 0 {
 		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
-			Agents: pool,
+			Agents:      pool,
+			BinaryPaths: binaryPaths,
 		}); err != nil {
 			return err
 		}
 		config.AgentPool = pool
 		config.RotateInstalled = false
+		selectionSpecified = true
 	}
 	if options.rotateInstalled {
 		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
 			RotateInstalled: true,
+			BinaryPaths:     binaryPaths,
+		}); err != nil {
+			return err
+		}
+		config.AgentPool = nil
+		config.RotateInstalled = true
+		selectionSpecified = true
+	}
+	if !selectionSpecified && shouldAutoRotateInstalledAgents(*config) {
+		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
+			RotateInstalled: true,
+			BinaryPaths:     binaryPaths,
 		}); err != nil {
 			return err
 		}
@@ -469,6 +498,29 @@ func applyDaemonInstallOptions(config *sah.Config, options daemonInstallOptions)
 		config.AgentTimeout = options.timeout
 	}
 	return nil
+}
+
+func shouldAutoRotateInstalledAgents(config sah.Config) bool {
+	if len(config.AgentPool) > 0 || config.RotateInstalled {
+		return false
+	}
+	if strings.TrimSpace(config.AgentModel) != "" {
+		return false
+	}
+	defaultAgent := strings.ToLower(strings.TrimSpace(config.DefaultAgent))
+	return defaultAgent == "" || defaultAgent == sah.DefaultAgent
+}
+
+func daemonAgentSelectionError(err error) error {
+	return fmt.Errorf("cannot install daemon: %w", err)
+}
+
+func joinAgentNames(pool []sah.AgentSpec) string {
+	names := make([]string, 0, len(pool))
+	for _, agent := range pool {
+		names = append(names, agent.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 func resolveExecutable() (string, error) {

@@ -23,7 +23,7 @@ go build -o bin/sah ./cmd/sah
 For release builds, inject the version via `ldflags`.
 
 ```sh
-go build -trimpath -ldflags="-s -w -X main.version=v0.6.0" -o bin/sah ./cmd/sah
+go build -trimpath -ldflags="-s -w -X main.version=v0.6.1" -o bin/sah ./cmd/sah
 ```
 
 ## Run
@@ -39,7 +39,7 @@ sah daemon install
 
 `sah daemon install` both installs and starts the per-user background service. Use `sah daemon start` only after a manual `stop` or after logging back into the relevant service manager session.
 
-On Linux, `sah daemon install` writes a per-user `systemd --user` unit and restarts it immediately. On macOS, it writes a per-user `launchd` plist and bootstraps it immediately.
+On Linux, `sah daemon install` writes a per-user `systemd --user` unit and restarts it immediately. On macOS, it writes a per-user `launchd` plist and bootstraps it immediately. Unless you pass `--agent`, `--agents`, or `--rotate-installed`, the install command detects every installed supported agent CLI and persists round-robin mode for the daemon automatically.
 
 If you want the Linux user service to keep running without an active login session, enable lingering first:
 
@@ -47,7 +47,7 @@ If you want the Linux user service to keep running without an active login sessi
 loginctl enable-linger "$USER"
 ```
 
-If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, re-run `sah daemon install` from a shell where that agent is already on `PATH`. The install command captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
+If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, `sah daemon install` fails before it starts the service. Run `sah agents` to inspect detection, then re-run the install from a shell where at least one supported CLI is already on `PATH`. The install command captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
 
 For remote Linux sessions, you can use a text browser during auth:
 
@@ -90,8 +90,8 @@ The hook runs:
 Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
 
 ```sh
-git tag v0.6.0
-git push origin v0.6.0
+git tag v0.6.1
+git push origin v0.6.1
 ```
 
 Required repository secrets:

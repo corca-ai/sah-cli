@@ -58,6 +58,108 @@ func TestPreferredLaunchdExecutableFallsBackToResolvedBinary(t *testing.T) {
 	}
 }
 
+func TestApplyDaemonInstallOptionsAutoRotatesInstalledAgentsByDefault(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	binaryPaths := map[string]string{
+		"codex":  writeTestExecutable(t, dir, "codex"),
+		"gemini": writeTestExecutable(t, dir, "gemini"),
+	}
+
+	config := sah.DefaultConfig()
+	if err := applyDaemonInstallOptions(&config, daemonInstallOptions{}, binaryPaths); err != nil {
+		t.Fatalf("applyDaemonInstallOptions returned error: %v", err)
+	}
+	if !config.RotateInstalled {
+		t.Fatal("expected daemon install to rotate installed agents by default")
+	}
+	if len(config.AgentPool) != 0 {
+		t.Fatalf("expected daemon install to persist rotate-installed instead of an explicit pool, got %#v", config.AgentPool)
+	}
+
+	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	if got := joinAgentNames(pool); got != "codex, gemini" {
+		t.Fatalf("expected daemon order codex, gemini, got %q", got)
+	}
+}
+
+func TestApplyDaemonInstallOptionsKeepsConfiguredPinnedAgent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	binaryPaths := map[string]string{
+		"codex":  writeTestExecutable(t, dir, "codex"),
+		"claude": writeTestExecutable(t, dir, "claude"),
+	}
+
+	config := sah.DefaultConfig()
+	config.DefaultAgent = "claude"
+
+	if err := applyDaemonInstallOptions(&config, daemonInstallOptions{}, binaryPaths); err != nil {
+		t.Fatalf("applyDaemonInstallOptions returned error: %v", err)
+	}
+	if config.RotateInstalled {
+		t.Fatal("expected explicit configured agent to stay pinned")
+	}
+
+	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	if got := joinAgentNames(pool); got != "claude" {
+		t.Fatalf("expected daemon order claude, got %q", got)
+	}
+}
+
+func TestApplyDaemonInstallOptionsKeepsGlobalModelPinnedConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+	binaryPaths := map[string]string{
+		"codex":  writeTestExecutable(t, dir, "codex"),
+		"gemini": writeTestExecutable(t, dir, "gemini"),
+	}
+
+	config := sah.DefaultConfig()
+	config.AgentModel = "gpt-5.4-mini"
+
+	if err := applyDaemonInstallOptions(&config, daemonInstallOptions{}, binaryPaths); err != nil {
+		t.Fatalf("applyDaemonInstallOptions returned error: %v", err)
+	}
+	if config.RotateInstalled {
+		t.Fatal("expected global model override to keep the existing pinned agent config")
+	}
+
+	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	if got := joinAgentNames(pool); got != "codex" {
+		t.Fatalf("expected daemon order codex, got %q", got)
+	}
+}
+
+func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *testing.T) {
+	t.Setenv("PATH", "")
+	config := sah.DefaultConfig()
+
+	err := applyDaemonInstallOptions(&config, daemonInstallOptions{}, nil)
+	if err == nil {
+		t.Fatal("expected daemon install to fail when no supported agent is detected")
+	}
+	if !sah.IsNoSupportedAgentCLI(err) {
+		t.Fatalf("expected missing-agent error, got %v", err)
+	}
+
+	reported := daemonAgentSelectionError(err)
+	for _, snippet := range []string{"cannot install daemon", "codex, gemini, claude, qwen", "sah agents"} {
+		if !strings.Contains(reported.Error(), snippet) {
+			t.Fatalf("expected error to contain %q, got %v", snippet, reported)
+		}
+	}
+}
+
 func TestLeaderboardDisplayEntriesKeepsTop15AndAppendsViewer(t *testing.T) {
 	entries := make([]sah.LeaderboardEntry, 0, 20)
 	for index := range 20 {
@@ -246,4 +348,14 @@ func captureStdout(t *testing.T, run func()) string {
 
 	_ = writer.Close()
 	return <-outputCh
+}
+
+func writeTestExecutable(t *testing.T, dir string, name string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", name, err)
+	}
+	return path
 }

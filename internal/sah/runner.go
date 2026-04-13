@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -47,6 +48,8 @@ type structuredAgentOutput struct {
 	AgentError string
 }
 
+var errNoSupportedAgentCLI = errors.New("no supported agent CLI found")
+
 var SupportedAgents = []AgentSpec{
 	{Name: "codex", Binary: "codex", Description: "OpenAI Codex CLI"},
 	{Name: "gemini", Binary: "gemini", Description: "Google Gemini CLI"},
@@ -83,7 +86,7 @@ func ResolveAgentWithBinaryPaths(name string, binaryPaths map[string]string) (Ag
 				return status.AgentSpec, nil
 			}
 		}
-		return AgentSpec{}, fmt.Errorf("no supported agent CLI found in configured paths or PATH")
+		return AgentSpec{}, noSupportedAgentCLIError()
 	}
 
 	for _, agent := range SupportedAgents {
@@ -95,6 +98,26 @@ func ResolveAgentWithBinaryPaths(name string, binaryPaths map[string]string) (Ag
 		}
 	}
 	return AgentSpec{}, fmt.Errorf("unsupported agent %q", name)
+}
+
+func IsNoSupportedAgentCLI(err error) bool {
+	return errors.Is(err, errNoSupportedAgentCLI)
+}
+
+func noSupportedAgentCLIError() error {
+	return fmt.Errorf(
+		"%w in configured paths or PATH; install one of: %s; run `sah agents` to inspect detection",
+		errNoSupportedAgentCLI,
+		supportedAgentNames(),
+	)
+}
+
+func supportedAgentNames() string {
+	names := make([]string, 0, len(SupportedAgents))
+	for _, agent := range SupportedAgents {
+		names = append(names, agent.Name)
+	}
+	return strings.Join(names, ", ")
 }
 
 func CaptureInstalledAgentBinaryPaths() map[string]string {

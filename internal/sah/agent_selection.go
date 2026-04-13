@@ -63,7 +63,7 @@ func resolveInstalledAgentPool(binaryPaths map[string]string) ([]AgentSpec, erro
 		}
 	}
 	if len(pool) == 0 {
-		return nil, fmt.Errorf("no supported agent CLI found in configured paths or PATH")
+		return nil, noSupportedAgentCLIError()
 	}
 	return pool, nil
 }
