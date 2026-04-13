@@ -29,7 +29,7 @@ For always-on background work:
 sah daemon install
 ```
 
-`sah daemon install` installs and starts the per-user background service immediately. On macOS it uses `launchd`. On Linux it uses `systemd --user`. By default it detects every installed supported agent CLI (`codex`, `gemini`, `claude`, `qwen`) and round-robins through them. If none are detected, the install fails before the service starts and points you to `sah agents`. In all cases it captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries. Re-run it after moving those binaries.
+`sah daemon install` installs and starts the per-user background service immediately. On macOS it uses `launchd`. On Linux it uses `systemd --user`. By default it detects every installed supported agent CLI (`codex`, `gemini`, `claude`, `qwen`, `hermes`, `openclaw`) and round-robins through them. If none are detected, the install fails before the service starts and points you to `sah agents`. In all cases it captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries. Re-run it after moving those binaries.
 
 On Linux, if you want the user service to survive logout and reboot without an active login session, enable lingering for that user with `loginctl enable-linger`.
 

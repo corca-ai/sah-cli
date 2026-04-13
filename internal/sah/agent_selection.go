@@ -147,9 +147,11 @@ func MergeAgentModels(base map[string]string, overrides map[string]string) map[s
 // ModelNotFoundError. Qwen is intentionally omitted so Qwen Code can use the
 // current default model resolved by the user's local auth/provider config.
 var DefaultAgentModels = map[string]string{
-	"codex":  "gpt-5.4-mini",
-	"gemini": "gemini-3-flash-base",
-	"claude": "sonnet",
+	"codex":    "gpt-5.4-mini",
+	"gemini":   "gemini-3-flash-base",
+	"claude":   "sonnet",
+	"hermes":   "sonnet",
+	"openclaw": "sonnet",
 }
 
 func ModelForAgent(agentName string, fallback string, overrides map[string]string) string {

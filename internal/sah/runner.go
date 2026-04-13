@@ -55,6 +55,8 @@ var SupportedAgents = []AgentSpec{
 	{Name: "gemini", Binary: "gemini", Description: "Google Gemini CLI"},
 	{Name: "claude", Binary: "claude", Description: "Anthropic Claude Code"},
 	{Name: "qwen", Binary: "qwen", Description: "Qwen Code CLI"},
+	{Name: "hermes", Binary: "hermes", Description: "Hermes Agent"},
+	{Name: "openclaw", Binary: "openclaw", Description: "OpenClaw CLI"},
 }
 
 func InstalledAgents() []AgentStatus {
@@ -284,6 +286,24 @@ func buildAgentCommand(
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
 		}
+	case "hermes":
+		args = []string{
+			"chat",
+			"-q", prompt,
+			"-Q",
+			"--yolo",
+			"--max-turns", "50",
+			"--source", "tool",
+		}
+	case "openclaw":
+		args = []string{
+			"chat",
+			"-q", prompt,
+			"-Q",
+			"--yolo",
+			"--max-turns", "50",
+			"--source", "tool",
+		}
 	default:
 		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
@@ -340,6 +360,10 @@ func parseStructuredOutput(agentName string, raw string) (*structuredAgentOutput
 		return parseClaudeStructuredOutput(raw)
 	case "qwen":
 		return parseQwenStructuredOutput(raw)
+	case "hermes":
+		return parsePlainTextOutput(raw)
+	case "openclaw":
+		return parsePlainTextOutput(raw)
 	default:
 		return nil, fmt.Errorf("unsupported agent %q", agentName)
 	}
@@ -407,6 +431,17 @@ func parseClaudeStructuredOutput(raw string) (*structuredAgentOutput, error) {
 
 func parseQwenStructuredOutput(raw string) (*structuredAgentOutput, error) {
 	return parseAssistantResultStructuredOutput(raw, parseQwenUsage)
+}
+
+func parsePlainTextOutput(raw string) (*structuredAgentOutput, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return nil, fmt.Errorf("agent produced no output")
+	}
+	return &structuredAgentOutput{
+		Text:  text,
+		Usage: TokenUsage{Available: false},
+	}, nil
 }
 
 func parseAssistantResultStructuredOutput(

@@ -49,6 +49,13 @@ func TestModelForAgentUsesBuiltinDefaults(t *testing.T) {
 	}
 }
 
+func TestModelForAgentHermesDefault(t *testing.T) {
+	model := ModelForAgent("hermes", "", nil)
+	if model != "sonnet" {
+		t.Fatalf("expected default hermes model to be 'sonnet', got %q", model)
+	}
+}
+
 func TestModelForAgentLeavesQwenUnsetWithoutOverrides(t *testing.T) {
 	model := ModelForAgent("qwen", "", nil)
 	if model != "" {

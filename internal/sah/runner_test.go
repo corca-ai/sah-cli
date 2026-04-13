@@ -73,6 +73,49 @@ func TestParseQwenStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestParsePlainTextOutput(t *testing.T) {
+	raw := `{"ok":true}`
+	output, err := parsePlainTextOutput(raw)
+	if err != nil {
+		t.Fatalf("parsePlainTextOutput returned error: %v", err)
+	}
+	if output.Text != `{"ok":true}` {
+		t.Fatalf("unexpected text: %q", output.Text)
+	}
+	if output.Usage.Available {
+		t.Fatal("expected usage to be unavailable for plain text output")
+	}
+}
+
+func TestParsePlainTextOutputEmpty(t *testing.T) {
+	_, err := parsePlainTextOutput("")
+	if err == nil {
+		t.Fatal("expected error for empty output")
+	}
+}
+
+func TestParseHermesStructuredOutput(t *testing.T) {
+	raw := `{"ok":true}`
+	output, err := parseStructuredOutput("hermes", raw)
+	if err != nil {
+		t.Fatalf("parseStructuredOutput for hermes returned error: %v", err)
+	}
+	if output.Text != `{"ok":true}` {
+		t.Fatalf("unexpected text: %q", output.Text)
+	}
+}
+
+func TestParseOpenclawStructuredOutput(t *testing.T) {
+	raw := `{"ok":true}`
+	output, err := parseStructuredOutput("openclaw", raw)
+	if err != nil {
+		t.Fatalf("parseStructuredOutput for openclaw returned error: %v", err)
+	}
+	if output.Text != `{"ok":true}` {
+		t.Fatalf("unexpected text: %q", output.Text)
+	}
+}
+
 func TestResolveAgentBinaryPathUsesConfiguredPath(t *testing.T) {
 	t.Setenv("PATH", "")
 
@@ -169,5 +212,77 @@ func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
 	}
 	if !strings.Contains(args, "--sandbox") {
 		t.Fatalf("expected qwen args to enable sandboxing, got %q", args)
+	}
+}
+
+func TestBuildAgentCommandForHermesUsesQuietQuery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hermes")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, useStdin, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "hermes", Binary: "hermes"},
+		"sonnet",
+		t.TempDir(),
+		`{"ok":true}`,
+		map[string]string{"hermes": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+	if useStdin {
+		t.Fatal("expected hermes prompt to be passed as an argument, not stdin")
+	}
+
+	args := strings.Join(command.Args[1:], " ")
+	if !strings.Contains(args, "chat") {
+		t.Fatalf("expected hermes args to include 'chat' subcommand, got %q", args)
+	}
+	if !strings.Contains(args, "-Q") {
+		t.Fatalf("expected hermes args to include quiet mode, got %q", args)
+	}
+	if !strings.Contains(args, "--yolo") {
+		t.Fatalf("expected hermes args to include --yolo, got %q", args)
+	}
+	if !strings.Contains(args, "--source tool") {
+		t.Fatalf("expected hermes args to include --source tool, got %q", args)
+	}
+}
+
+func TestBuildAgentCommandForOpenclawUsesQuietQuery(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "openclaw")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, useStdin, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "openclaw", Binary: "openclaw"},
+		"",
+		t.TempDir(),
+		`{"ok":true}`,
+		map[string]string{"openclaw": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+	if useStdin {
+		t.Fatal("expected openclaw prompt to be passed as an argument, not stdin")
+	}
+
+	args := strings.Join(command.Args[1:], " ")
+	if !strings.Contains(args, "chat") {
+		t.Fatalf("expected openclaw args to include 'chat' subcommand, got %q", args)
+	}
+	if !strings.Contains(args, "-Q") {
+		t.Fatalf("expected openclaw args to include quiet mode, got %q", args)
+	}
+	if !strings.Contains(args, "--yolo") {
+		t.Fatalf("expected openclaw args to include --yolo, got %q", args)
+	}
+	if !strings.Contains(args, "--max-turns 50") {
+		t.Fatalf("expected openclaw args to include --max-turns 50, got %q", args)
 	}
 }
