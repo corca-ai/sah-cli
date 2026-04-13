@@ -20,14 +20,14 @@ func TestParseCodexStructuredOutput(t *testing.T) {
 	if output.Text != `{"ok":true}` {
 		t.Fatalf("unexpected text: %q", output.Text)
 	}
-	if !output.Usage.Available || output.Usage.InputTokens != 100 || output.Usage.CachedTokens != 20 {
+	if !output.Usage.Available || output.Usage.InputTokens != 100 || output.Usage.CachedTokens != 20 || output.Usage.TotalTokens != 105 {
 		t.Fatalf("unexpected usage: %#v", output.Usage)
 	}
 }
 
 func TestParseGeminiStructuredOutput(t *testing.T) {
 	raw := `{"type":"message","role":"assistant","content":"{\"ok\":true}","delta":true}
-{"type":"result","status":"success","stats":{"total_tokens":50,"input_tokens":40,"output_tokens":10,"cached":5}}`
+{"type":"result","status":"success","stats":{"total_tokens":73516,"input_tokens":9916,"output_tokens":690,"cached":5}}`
 
 	output, err := parseGeminiStructuredOutput(raw)
 	if err != nil {
@@ -36,14 +36,14 @@ func TestParseGeminiStructuredOutput(t *testing.T) {
 	if output.Text != `{"ok":true}` {
 		t.Fatalf("unexpected text: %q", output.Text)
 	}
-	if output.Usage.TotalTokens != 50 || output.Usage.InputTokens != 40 || output.Usage.CachedTokens != 5 {
+	if output.Usage.TotalTokens != 73516 || output.Usage.InputTokens != 9916 || output.Usage.OutputTokens != 690 || output.Usage.CachedTokens != 5 || output.Usage.InternalTokens != 62910 {
 		t.Fatalf("unexpected usage: %#v", output.Usage)
 	}
 }
 
 func TestParseClaudeStructuredOutput(t *testing.T) {
 	raw := `{"type":"assistant","message":{"content":[{"type":"text","text":"{\"ok\":true}"}]}}
-{"type":"result","is_error":false,"usage":{"input_tokens":12,"cache_read_input_tokens":3,"output_tokens":4}}`
+{"type":"result","is_error":false,"usage":{"input_tokens":3,"cache_creation_input_tokens":4824,"cache_read_input_tokens":12074,"output_tokens":8}}`
 
 	output, err := parseClaudeStructuredOutput(raw)
 	if err != nil {
@@ -52,7 +52,7 @@ func TestParseClaudeStructuredOutput(t *testing.T) {
 	if output.Text != `{"ok":true}` {
 		t.Fatalf("unexpected text: %q", output.Text)
 	}
-	if output.Usage.InputTokens != 12 || output.Usage.OutputTokens != 4 || output.Usage.CachedTokens != 3 {
+	if output.Usage.InputTokens != 3 || output.Usage.OutputTokens != 8 || output.Usage.CachedTokens != 12074 || output.Usage.CacheWriteTokens != 4824 || output.Usage.TotalTokens != 16909 {
 		t.Fatalf("unexpected usage: %#v", output.Usage)
 	}
 }
@@ -68,7 +68,7 @@ func TestParseQwenStructuredOutput(t *testing.T) {
 	if output.Text != `{"ok":true}` {
 		t.Fatalf("unexpected text: %q", output.Text)
 	}
-	if output.Usage.InputTokens != 21 || output.Usage.OutputTokens != 6 || output.Usage.CachedTokens != 4 || output.Usage.TotalTokens != 27 {
+	if output.Usage.InputTokens != 21 || output.Usage.OutputTokens != 6 || output.Usage.CachedTokens != 4 || output.Usage.TotalTokens != 27 || output.Usage.InternalTokens != 0 {
 		t.Fatalf("unexpected usage: %#v", output.Usage)
 	}
 }

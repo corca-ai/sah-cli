@@ -133,9 +133,11 @@ type CLIExchangeResponse struct {
 }
 
 type TokenUsage struct {
-	Available    bool
-	InputTokens  int64
-	OutputTokens int64
-	CachedTokens int64
-	TotalTokens  int64
+	Available        bool
+	InputTokens      int64
+	OutputTokens     int64
+	CachedTokens     int64
+	CacheWriteTokens int64
+	InternalTokens   int64
+	TotalTokens      int64
 }

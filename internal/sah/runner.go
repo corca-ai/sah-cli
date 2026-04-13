@@ -450,47 +450,85 @@ func parseJSONLines(raw string, visit func(map[string]any)) error {
 }
 
 func parseCodexUsage(usage map[string]any) TokenUsage {
+	input := int64Value(usage["input_tokens"])
+	output := int64Value(usage["output_tokens"])
+	total := int64Value(usage["total_tokens"])
+	if total == 0 {
+		total = input + output
+	}
+
 	return TokenUsage{
 		Available:    len(usage) > 0,
-		InputTokens:  int64Value(usage["input_tokens"]),
-		OutputTokens: int64Value(usage["output_tokens"]),
+		InputTokens:  input,
+		OutputTokens: output,
 		CachedTokens: int64Value(usage["cached_input_tokens"]),
-		TotalTokens:  int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"]),
+		TotalTokens:  total,
 	}
 }
 
 func parseGeminiUsage(stats map[string]any) TokenUsage {
+	input := int64Value(stats["input_tokens"])
+	output := int64Value(stats["output_tokens"])
+	total := int64Value(stats["total_tokens"])
+	if total == 0 {
+		total = input + output
+	}
+
 	return TokenUsage{
-		Available:    len(stats) > 0,
-		InputTokens:  int64Value(stats["input_tokens"]),
-		OutputTokens: int64Value(stats["output_tokens"]),
-		CachedTokens: int64Value(stats["cached"]),
-		TotalTokens:  int64Value(stats["total_tokens"]),
+		Available:      len(stats) > 0,
+		InputTokens:    input,
+		OutputTokens:   output,
+		CachedTokens:   int64Value(stats["cached"]),
+		InternalTokens: positiveDelta(total, input+output),
+		TotalTokens:    total,
 	}
 }
 
 func parseClaudeUsage(usage map[string]any) TokenUsage {
+	input := int64Value(usage["input_tokens"])
+	output := int64Value(usage["output_tokens"])
+	cacheRead := int64Value(usage["cache_read_input_tokens"])
+	cacheWrite := int64Value(usage["cache_creation_input_tokens"])
+	total := int64Value(usage["total_tokens"])
+	if total == 0 {
+		total = input + output + cacheRead + cacheWrite
+	}
+
 	return TokenUsage{
-		Available:    len(usage) > 0,
-		InputTokens:  int64Value(usage["input_tokens"]),
-		OutputTokens: int64Value(usage["output_tokens"]),
-		CachedTokens: int64Value(usage["cache_read_input_tokens"]),
-		TotalTokens:  int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"]),
+		Available:        len(usage) > 0,
+		InputTokens:      input,
+		OutputTokens:     output,
+		CachedTokens:     cacheRead,
+		CacheWriteTokens: cacheWrite,
+		InternalTokens:   positiveDelta(total, input+output+cacheRead+cacheWrite),
+		TotalTokens:      total,
 	}
 }
 
 func parseQwenUsage(usage map[string]any) TokenUsage {
+	input := int64Value(usage["input_tokens"])
+	output := int64Value(usage["output_tokens"])
+	cacheWrite := int64Value(usage["cache_creation_input_tokens"])
 	total := int64Value(usage["total_tokens"])
 	if total == 0 {
-		total = int64Value(usage["input_tokens"]) + int64Value(usage["output_tokens"])
+		total = input + output + cacheWrite
 	}
 	return TokenUsage{
-		Available:    len(usage) > 0,
-		InputTokens:  int64Value(usage["input_tokens"]),
-		OutputTokens: int64Value(usage["output_tokens"]),
-		CachedTokens: int64Value(usage["cache_read_input_tokens"]),
-		TotalTokens:  total,
+		Available:        len(usage) > 0,
+		InputTokens:      input,
+		OutputTokens:     output,
+		CachedTokens:     int64Value(usage["cache_read_input_tokens"]),
+		CacheWriteTokens: cacheWrite,
+		InternalTokens:   positiveDelta(total, input+output+cacheWrite),
+		TotalTokens:      total,
 	}
+}
+
+func positiveDelta(total int64, known int64) int64 {
+	if total <= known {
+		return 0
+	}
+	return total - known
 }
 
 func mapValue(value any) map[string]any {

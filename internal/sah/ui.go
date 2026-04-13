@@ -75,7 +75,7 @@ func PrintCycleSummary(
 		_, _ = fmt.Fprintf(writer, "Agent        %s\n", result.Agent.Name)
 	}
 	_, _ = fmt.Fprintf(writer, "Runtime      %s\n", humanDuration(result.Duration))
-	_, _ = fmt.Fprintf(writer, "Tokens       %s\n", formatTokenUsage(result.Usage))
+	_, _ = fmt.Fprintf(writer, "Tokens       %s\n", formatTokenUsage(result.Agent.Name, result.Usage))
 	_, _ = fmt.Fprintf(writer, "Contribution %s\n", SummarizeContribution(assignment, result.Payload))
 	_, _ = fmt.Fprintf(
 		writer,
@@ -86,20 +86,33 @@ func PrintCycleSummary(
 	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
 }
 
-func formatTokenUsage(usage TokenUsage) string {
+func formatTokenUsage(agentName string, usage TokenUsage) string {
 	if !usage.Available {
 		return "unavailable"
 	}
 
+	inputLabel := "in"
+	cachedLabel := "cached"
+	if agentName == "claude" {
+		inputLabel = "uncached in"
+		cachedLabel = "cache read"
+	}
+
 	parts := []string{
-		fmt.Sprintf("%s in", formatInt(usage.InputTokens)),
+		fmt.Sprintf("%s %s", formatInt(usage.InputTokens), inputLabel),
 		fmt.Sprintf("%s out", formatInt(usage.OutputTokens)),
 	}
 	if usage.TotalTokens > 0 {
 		parts = append(parts, fmt.Sprintf("%s total", formatInt(usage.TotalTokens)))
 	}
 	if usage.CachedTokens > 0 {
-		parts = append(parts, fmt.Sprintf("%s cached", formatInt(usage.CachedTokens)))
+		parts = append(parts, fmt.Sprintf("%s %s", formatInt(usage.CachedTokens), cachedLabel))
+	}
+	if usage.CacheWriteTokens > 0 {
+		parts = append(parts, fmt.Sprintf("%s cache write", formatInt(usage.CacheWriteTokens)))
+	}
+	if usage.InternalTokens > 0 {
+		parts = append(parts, fmt.Sprintf("%s internal", formatInt(usage.InternalTokens)))
 	}
 	return strings.Join(parts, " / ")
 }
