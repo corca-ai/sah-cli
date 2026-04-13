@@ -141,3 +141,46 @@ func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 		t.Fatalf("ReleaseOpenAssignment returned error: %v", err)
 	}
 }
+
+func TestGetLeaderboardDecodesPublicLabelsAndViewer(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get("X-API-Key"); got != "test-key" {
+			t.Fatalf("unexpected api key header: %q", got)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"weekly": [
+				{"id": 1, "public_id": "usr_1", "public_label": "Ada", "earned": 42}
+			],
+			"monthly": [
+				{"id": 2, "name": "Legacy Name", "earned": 21}
+			],
+			"all_time": [],
+			"viewer": {
+				"weekly": {"id": 99, "public_id": "usr_me", "public_label": "Grace", "earned": 7, "rank": 27}
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	response, err := client.GetLeaderboard(context.Background())
+	if err != nil {
+		t.Fatalf("GetLeaderboard returned error: %v", err)
+	}
+
+	if got := response.Weekly[0].PublicLabel; got != "Ada" {
+		t.Fatalf("unexpected weekly public label: %q", got)
+	}
+	if got := response.Monthly[0].PublicLabel; got != "Legacy Name" {
+		t.Fatalf("expected legacy name fallback, got %q", got)
+	}
+	if response.Viewer == nil || response.Viewer.Weekly == nil {
+		t.Fatalf("expected weekly viewer entry, got %#v", response.Viewer)
+	}
+	if got := response.Viewer.Weekly.Rank; got != 27 {
+		t.Fatalf("unexpected weekly viewer rank: %d", got)
+	}
+}

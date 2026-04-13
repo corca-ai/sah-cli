@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"text/tabwriter"
@@ -18,6 +19,8 @@ import (
 )
 
 var version = "dev"
+
+const leaderboardVisibleRows = 15
 
 func main() {
 	if len(os.Args) < 2 {
@@ -627,25 +630,29 @@ func leaderboardCmd(args []string) error {
 	if strings.TrimSpace(*baseURL) != "" {
 		config.BaseURL = *baseURL
 	}
-	client := sah.NewClient(config.BaseURL, "")
+	client := sah.NewClient(config.BaseURL, config.APIKey)
 	response, err := client.GetLeaderboard(ctx)
+	if err != nil && strings.TrimSpace(config.APIKey) != "" &&
+		(sah.IsStatus(err, http.StatusUnauthorized) || sah.IsStatus(err, http.StatusForbidden)) {
+		response, err = sah.NewClient(config.BaseURL, "").GetLeaderboard(ctx)
+	}
 	if err != nil {
 		return err
 	}
 
 	switch strings.ToLower(strings.TrimSpace(*window)) {
 	case "all":
-		printLeaderboardSection("Weekly", response.Weekly)
+		printLeaderboardSection("Weekly", response.Weekly, leaderboardViewerEntry(response.Viewer, "weekly"))
 		fmt.Println()
-		printLeaderboardSection("Monthly", response.Monthly)
+		printLeaderboardSection("Monthly", response.Monthly, leaderboardViewerEntry(response.Viewer, "monthly"))
 		fmt.Println()
-		printLeaderboardSection("All-Time", response.AllTime)
+		printLeaderboardSection("All-Time", response.AllTime, leaderboardViewerEntry(response.Viewer, "all-time"))
 	case "weekly":
-		printLeaderboardSection("Weekly", response.Weekly)
+		printLeaderboardSection("Weekly", response.Weekly, leaderboardViewerEntry(response.Viewer, "weekly"))
 	case "monthly":
-		printLeaderboardSection("Monthly", response.Monthly)
+		printLeaderboardSection("Monthly", response.Monthly, leaderboardViewerEntry(response.Viewer, "monthly"))
 	case "all-time":
-		printLeaderboardSection("All-Time", response.AllTime)
+		printLeaderboardSection("All-Time", response.AllTime, leaderboardViewerEntry(response.Viewer, "all-time"))
 	default:
 		return fmt.Errorf("unsupported window %q", *window)
 	}
@@ -733,17 +740,107 @@ func printHistorySection(title string, entries []sah.HistoryEntry) {
 	_ = writer.Flush()
 }
 
-func printLeaderboardSection(title string, entries []sah.LeaderboardEntry) {
+type leaderboardDisplayEntry struct {
+	Rank   string
+	Label  string
+	Earned string
+}
+
+func leaderboardViewerEntry(viewer *sah.LeaderboardViewer, window string) *sah.LeaderboardEntry {
+	if viewer == nil {
+		return nil
+	}
+
+	switch strings.ToLower(strings.TrimSpace(window)) {
+	case "weekly":
+		return viewer.Weekly
+	case "monthly":
+		return viewer.Monthly
+	case "all-time":
+		return viewer.AllTime
+	default:
+		return nil
+	}
+}
+
+func leaderboardEntryLabel(entry sah.LeaderboardEntry) string {
+	if label := strings.TrimSpace(entry.PublicLabel); label != "" {
+		return label
+	}
+	if publicID := strings.TrimSpace(entry.PublicID); publicID != "" {
+		return publicID
+	}
+	if entry.ID > 0 {
+		return fmt.Sprintf("user-%d", entry.ID)
+	}
+	return "(unknown)"
+}
+
+func leaderboardDisplayEntries(
+	entries []sah.LeaderboardEntry,
+	viewer *sah.LeaderboardEntry,
+) []leaderboardDisplayEntry {
+	if len(entries) > leaderboardVisibleRows {
+		entries = entries[:leaderboardVisibleRows]
+	}
+
+	display := make([]leaderboardDisplayEntry, 0, len(entries)+2)
+	for index, entry := range entries {
+		rank := entry.Rank
+		if rank <= 0 {
+			rank = index + 1
+		}
+		display = append(display, leaderboardDisplayEntry{
+			Rank:   strconv.Itoa(rank),
+			Label:  leaderboardEntryLabel(entry),
+			Earned: strconv.Itoa(entry.Earned),
+		})
+	}
+
+	if viewer == nil || viewer.Rank <= 0 {
+		return display
+	}
+	for _, entry := range entries {
+		if entry.ID == viewer.ID {
+			return display
+		}
+	}
+
+	lastRank := 0
+	if len(entries) > 0 {
+		lastRank = entries[len(entries)-1].Rank
+		if lastRank <= 0 {
+			lastRank = len(entries)
+		}
+	}
+	if lastRank > 0 && viewer.Rank > lastRank+1 {
+		display = append(display, leaderboardDisplayEntry{
+			Rank:   "...",
+			Label:  "...",
+			Earned: "...",
+		})
+	}
+
+	display = append(display, leaderboardDisplayEntry{
+		Rank:   strconv.Itoa(viewer.Rank),
+		Label:  leaderboardEntryLabel(*viewer),
+		Earned: strconv.Itoa(viewer.Earned),
+	})
+	return display
+}
+
+func printLeaderboardSection(title string, entries []sah.LeaderboardEntry, viewer *sah.LeaderboardEntry) {
 	fmt.Println(title)
-	if len(entries) == 0 {
+	display := leaderboardDisplayEntries(entries, viewer)
+	if len(display) == 0 {
 		fmt.Println("  (none)")
 		return
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(writer, "RANK\tNAME\tSCORE")
-	for index, entry := range entries {
-		_, _ = fmt.Fprintf(writer, "%d\t%s\t%d\n", index+1, entry.Name, entry.Earned)
+	for _, entry := range display {
+		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\n", entry.Rank, entry.Label, entry.Earned)
 	}
 	_ = writer.Flush()
 }

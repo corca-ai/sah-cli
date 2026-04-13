@@ -1,6 +1,9 @@
 package sah
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type Assignment struct {
 	AssignmentID       int64                  `json:"assignment_id"`
@@ -78,15 +81,50 @@ type ContributionsResponse struct {
 }
 
 type LeaderboardEntry struct {
-	ID     int64  `json:"id"`
-	Name   string `json:"name"`
-	Earned int    `json:"earned"`
+	ID          int64  `json:"id"`
+	PublicID    string `json:"public_id,omitempty"`
+	PublicLabel string `json:"public_label"`
+	Earned      int    `json:"earned"`
+	Rank        int    `json:"rank,omitempty"`
+}
+
+func (entry *LeaderboardEntry) UnmarshalJSON(data []byte) error {
+	type rawLeaderboardEntry struct {
+		ID          int64  `json:"id"`
+		PublicID    string `json:"public_id"`
+		PublicLabel string `json:"public_label"`
+		Name        string `json:"name"`
+		Earned      int    `json:"earned"`
+		Rank        int    `json:"rank"`
+	}
+
+	var raw rawLeaderboardEntry
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	entry.ID = raw.ID
+	entry.PublicID = raw.PublicID
+	entry.PublicLabel = raw.PublicLabel
+	if entry.PublicLabel == "" {
+		entry.PublicLabel = raw.Name
+	}
+	entry.Earned = raw.Earned
+	entry.Rank = raw.Rank
+	return nil
+}
+
+type LeaderboardViewer struct {
+	AllTime *LeaderboardEntry `json:"all_time,omitempty"`
+	Weekly  *LeaderboardEntry `json:"weekly,omitempty"`
+	Monthly *LeaderboardEntry `json:"monthly,omitempty"`
 }
 
 type LeaderboardResponse struct {
 	AllTime []LeaderboardEntry `json:"all_time"`
 	Weekly  []LeaderboardEntry `json:"weekly"`
 	Monthly []LeaderboardEntry `json:"monthly"`
+	Viewer  *LeaderboardViewer `json:"viewer,omitempty"`
 }
 
 type CLIExchangeResponse struct {
