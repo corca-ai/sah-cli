@@ -1,9 +1,12 @@
 package sah
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestBrowserCommandPrefersBROWSEROnLinux(t *testing.T) {
-	command, err := browserCommand("https://example.com", "linux", func(key string) string {
+	command, err := browserCommand("https://example.com", func(key string) string {
 		if key == "BROWSER" {
 			return "w3m"
 		}
@@ -21,7 +24,7 @@ func TestBrowserCommandPrefersBROWSEROnLinux(t *testing.T) {
 }
 
 func TestBrowserCommandSupportsPlaceholder(t *testing.T) {
-	command, err := browserCommand("https://example.com", "linux", func(key string) string {
+	command, err := browserCommand("https://example.com", func(key string) string {
 		if key == "BROWSER" {
 			return "links %s"
 		}
@@ -38,12 +41,26 @@ func TestBrowserCommandSupportsPlaceholder(t *testing.T) {
 	}
 }
 
-func TestBrowserCommandFallsBackToXdgOpenOnLinux(t *testing.T) {
-	command, err := browserCommand("https://example.com", "linux", func(string) string { return "" })
-	if err != nil {
-		t.Fatalf("browserCommand returned error: %v", err)
-	}
-	if got := command.Args[0]; got != "xdg-open" {
-		t.Fatalf("expected xdg-open fallback, got %q", got)
+func TestBrowserCommandFallsBackToPlatformLauncher(t *testing.T) {
+	command, err := browserCommand("https://example.com", func(string) string { return "" })
+	switch runtime.GOOS {
+	case "darwin":
+		if err != nil {
+			t.Fatalf("browserCommand returned error: %v", err)
+		}
+		if got := command.Args[0]; got != "open" {
+			t.Fatalf("expected open fallback, got %q", got)
+		}
+	case "linux":
+		if err != nil {
+			t.Fatalf("browserCommand returned error: %v", err)
+		}
+		if got := command.Args[0]; got != "xdg-open" {
+			t.Fatalf("expected xdg-open fallback, got %q", got)
+		}
+	default:
+		if err == nil {
+			t.Fatalf("expected unsupported platform error on %s", runtime.GOOS)
+		}
 	}
 }

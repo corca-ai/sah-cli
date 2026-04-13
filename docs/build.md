@@ -68,6 +68,12 @@ go test ./...
 golangci-lint run
 ```
 
+To match the Linux CI target from macOS, also run:
+
+```sh
+GOOS=linux GOARCH=amd64 golangci-lint run ./...
+```
+
 ## Pre-commit Hook
 
 The repository includes a pre-commit hook in `.githooks/`. Enable it once after cloning:
@@ -83,6 +89,7 @@ The hook runs:
 - `CGO_ENABLED=1 go test -race ./...`
 - `golangci-lint config verify`
 - `golangci-lint run ./...`
+- `GOOS=linux GOARCH=amd64 golangci-lint run ./...`
 - `go build -o .tmp-bin/sah ./cmd/sah`
 
 ## Release

@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"runtime"
 	"strings"
 )
 
@@ -155,7 +154,7 @@ func challengeForVerifier(verifier string) string {
 }
 
 func openBrowser(rawURL string) error {
-	command, err := browserCommand(rawURL, runtime.GOOS, os.Getenv)
+	command, err := browserCommand(rawURL, os.Getenv)
 	if err != nil {
 		return err
 	}
@@ -166,7 +165,7 @@ func openBrowser(rawURL string) error {
 	return nil
 }
 
-func browserCommand(rawURL string, goos string, getenv func(string) string) (*exec.Cmd, error) {
+func browserCommand(rawURL string, getenv func(string) string) (*exec.Cmd, error) {
 	if browser := strings.TrimSpace(getenv("BROWSER")); browser != "" {
 		args, err := browserCommandArgs(browser, rawURL)
 		if err != nil {
@@ -174,15 +173,7 @@ func browserCommand(rawURL string, goos string, getenv func(string) string) (*ex
 		}
 		return exec.Command(args[0], args[1:]...), nil
 	}
-
-	switch goos {
-	case "darwin":
-		return exec.Command("open", rawURL), nil
-	case "linux":
-		return exec.Command("xdg-open", rawURL), nil
-	default:
-		return nil, fmt.Errorf("automatic browser open is unsupported on %s", goos)
-	}
+	return defaultBrowserCommand(rawURL)
 }
 
 func browserCommandArgs(browser string, rawURL string) ([]string, error) {
