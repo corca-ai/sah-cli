@@ -1,6 +1,7 @@
 package sah
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -57,6 +58,67 @@ func TestLaunchAgentEnvironmentFallsBackToDefaultPath(t *testing.T) {
 	}
 	if environment["HOME"] != "/Users/tester" {
 		t.Fatalf("expected HOME to be preserved, got %q", environment["HOME"])
+	}
+}
+
+func TestLaunchAgentStatusWithRunnerTreatsMissingServiceAsNotLoaded(t *testing.T) {
+	loaded, output, err := launchAgentStatusWithRunner(func(args ...string) (string, error) {
+		return "", fmt.Errorf("exit status 113: Could not find service")
+	})
+	if err != nil {
+		t.Fatalf("launchAgentStatusWithRunner returned error: %v", err)
+	}
+	if loaded {
+		t.Fatal("expected service to be treated as not loaded")
+	}
+	if output != "" {
+		t.Fatalf("expected empty output, got %q", output)
+	}
+}
+
+func TestIsRetryableBootstrapError(t *testing.T) {
+	if !isRetryableBootstrapError(fmt.Errorf("exit status 5: Bootstrap failed: 5: Input/output error")) {
+		t.Fatal("expected input/output bootstrap error to be retryable")
+	}
+	if isRetryableBootstrapError(fmt.Errorf("exit status 3: permission denied")) {
+		t.Fatal("expected unrelated bootstrap error to not be retryable")
+	}
+}
+
+func TestBootstrapLaunchAgentWithRunnerRetriesInputOutputError(t *testing.T) {
+	attempts := 0
+	err := bootstrapLaunchAgentWithRunner(
+		Paths{LaunchAgentPlist: "/tmp/ai.borca.sah.plist"},
+		func(args ...string) (string, error) {
+			attempts++
+			if attempts < 3 {
+				return "", fmt.Errorf("exit status 5: Bootstrap failed: 5: Input/output error")
+			}
+			return "", nil
+		},
+		3,
+		0,
+	)
+	if err != nil {
+		t.Fatalf("bootstrapLaunchAgentWithRunner returned error: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestWaitForLaunchAgentLoadedStateEventuallySucceeds(t *testing.T) {
+	states := []bool{true, true, false}
+	index := 0
+	err := waitForLaunchAgentLoadedStateWithCheck(func() (bool, string, error) {
+		loaded := states[index]
+		if index < len(states)-1 {
+			index++
+		}
+		return loaded, "", nil
+	}, false, 3, 0)
+	if err != nil {
+		t.Fatalf("waitForLaunchAgentLoadedState returned error: %v", err)
 	}
 }
 

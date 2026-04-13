@@ -8,9 +8,17 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 )
 
 const defaultLaunchdPATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+
+const (
+	launchAgentStatusPollAttempts = 20
+	launchAgentStatusPollDelay    = 100 * time.Millisecond
+	launchAgentBootstrapAttempts  = 5
+	launchAgentBootstrapDelay     = 200 * time.Millisecond
+)
 
 func InstallLaunchAgent(paths Paths, executable string) error {
 	if err := os.MkdirAll(paths.ConfigDir, 0o755); err != nil {
@@ -37,6 +45,9 @@ func InstallLaunchAgent(paths Paths, executable string) error {
 	}
 
 	_ = StopLaunchAgent()
+	if err := waitForLaunchAgentLoadedState(false, launchAgentStatusPollAttempts, launchAgentStatusPollDelay); err != nil {
+		return fmt.Errorf("wait for previous launch agent to unload: %w", err)
+	}
 	if err := BootstrapLaunchAgent(paths); err != nil {
 		return err
 	}
@@ -165,11 +176,34 @@ func plistEscape(value string) string {
 }
 
 func BootstrapLaunchAgent(paths Paths) error {
-	_, err := runLaunchctl("bootstrap", launchdDomain(), paths.LaunchAgentPlist)
-	if err != nil {
-		return fmt.Errorf("bootstrap launch agent: %w", err)
+	return bootstrapLaunchAgentWithRunner(paths, runLaunchctl, launchAgentBootstrapAttempts, launchAgentBootstrapDelay)
+}
+
+func bootstrapLaunchAgentWithRunner(
+	paths Paths,
+	runner func(args ...string) (string, error),
+	attempts int,
+	delay time.Duration,
+) error {
+	if attempts <= 0 {
+		attempts = 1
 	}
-	return nil
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		_, err := runner("bootstrap", launchdDomain(), paths.LaunchAgentPlist)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isRetryableBootstrapError(err) || attempt == attempts {
+			return fmt.Errorf("bootstrap launch agent: %w", err)
+		}
+		if delay > 0 {
+			time.Sleep(delay)
+		}
+	}
+	return fmt.Errorf("bootstrap launch agent: %w", lastErr)
 }
 
 func StartLaunchAgent() error {
@@ -197,15 +231,71 @@ func UninstallLaunchAgent(paths Paths) error {
 }
 
 func LaunchAgentStatus() (bool, string, error) {
-	output, err := runLaunchctl("print", launchdDomain()+"/"+DefaultLaunchdLabel)
+	return launchAgentStatusWithRunner(runLaunchctl)
+}
+
+func launchAgentStatusWithRunner(runner func(args ...string) (string, error)) (bool, string, error) {
+	output, err := runner("print", launchdDomain()+"/"+DefaultLaunchdLabel)
 	if err != nil {
-		if strings.Contains(err.Error(), "Could not find service") || strings.Contains(err.Error(), "service not found") {
+		if isLaunchAgentNotLoadedError(err) {
 			err = nil
 			return false, "", err
 		}
 		return false, "", err
 	}
 	return true, output, nil
+}
+
+func waitForLaunchAgentLoadedState(wantLoaded bool, attempts int, delay time.Duration) error {
+	return waitForLaunchAgentLoadedStateWithCheck(LaunchAgentStatus, wantLoaded, attempts, delay)
+}
+
+func waitForLaunchAgentLoadedStateWithCheck(
+	check func() (bool, string, error),
+	wantLoaded bool,
+	attempts int,
+	delay time.Duration,
+) error {
+	if attempts <= 0 {
+		attempts = 1
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= attempts; attempt++ {
+		loaded, _, err := check()
+		if err == nil && loaded == wantLoaded {
+			return nil
+		}
+		switch {
+		case err != nil:
+			lastErr = err
+		case wantLoaded:
+			lastErr = fmt.Errorf("launch agent is not loaded yet")
+		default:
+			lastErr = fmt.Errorf("launch agent is still unloading")
+		}
+
+		if attempt < attempts && delay > 0 {
+			time.Sleep(delay)
+		}
+	}
+	return lastErr
+}
+
+func isLaunchAgentNotLoadedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "Could not find service") || strings.Contains(message, "service not found")
+}
+
+func isRetryableBootstrapError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "bootstrap failed: 5") || strings.Contains(message, "input/output error")
 }
 
 func launchdDomain() string {
