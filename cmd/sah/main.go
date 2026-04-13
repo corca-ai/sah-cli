@@ -567,7 +567,6 @@ func meCmd(args []string) error {
 	fmt.Printf("Email: %s\n", me.Email)
 	fmt.Printf("Rank: #%d\n", me.Rank)
 	fmt.Printf("Credits: %d\n", me.Credits)
-	fmt.Printf("Lifetime earned: %d\n", me.LifetimeEarned)
 	fmt.Printf("Leaderboard score: %d\n", me.LeaderboardScore)
 	fmt.Printf("Pending credits: %d\n", me.PendingCredits)
 	fmt.Printf("Trust: %.4f\n", me.Trust)

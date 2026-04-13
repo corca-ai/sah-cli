@@ -52,7 +52,6 @@ type MeResponse struct {
 	Email            string    `json:"email"`
 	Name             string    `json:"name"`
 	Credits          int       `json:"credits"`
-	LifetimeEarned   int       `json:"lifetime_earned"`
 	LeaderboardScore int       `json:"leaderboard_score"`
 	Trust            float64   `json:"trust"`
 	CreatedAt        time.Time `json:"created_at"`
