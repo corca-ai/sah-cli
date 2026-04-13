@@ -222,8 +222,14 @@ func (client *Client) doJSONWithHeaders(
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, decodeStatusError(response)
 	}
-	if out == nil || response.StatusCode == http.StatusNoContent {
+	if out == nil {
 		return headers, nil
+	}
+	if response.StatusCode == http.StatusNoContent {
+		return headers, &StatusError{
+			StatusCode: response.StatusCode,
+			Message:    http.StatusText(http.StatusNoContent),
+		}
 	}
 	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)

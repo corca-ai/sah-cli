@@ -142,6 +142,27 @@ func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 	}
 }
 
+func TestGetTaskReturnsNoContentStatusError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/s@h/tasks" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	assignment, err := client.GetTask(context.Background(), "")
+	if !IsStatus(err, http.StatusNoContent) {
+		t.Fatalf("expected 204 status error, got assignment=%#v err=%v", assignment, err)
+	}
+	if assignment != nil {
+		t.Fatalf("expected nil assignment on 204, got %#v", assignment)
+	}
+}
+
 func TestGetLeaderboardDecodesPublicLabelsAndViewer(t *testing.T) {
 	t.Parallel()
 

@@ -192,6 +192,16 @@ func runWorkerCycle(
 	case err != nil:
 		return WorkerCycleResult{}, err
 	}
+	if assignment == nil {
+		return WorkerCycleResult{}, fmt.Errorf("task fetch returned no assignment payload")
+	}
+	if assignment.AssignmentID <= 0 || strings.TrimSpace(assignment.TaskType) == "" {
+		return WorkerCycleResult{}, fmt.Errorf(
+			"task fetch returned invalid assignment payload: id=%d task_type=%q",
+			assignment.AssignmentID,
+			assignment.TaskType,
+		)
+	}
 
 	logLine(
 		options.Output,

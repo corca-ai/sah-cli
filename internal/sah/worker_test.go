@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +182,53 @@ func TestRunWorkerCycleUsesClearOpenAssignmentMessage(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("Too many open assignments")) {
 		t.Fatalf("expected clear cap message, got %q", stdout.String())
+	}
+}
+
+func TestRunWorkerCycleLogsNoTaskAvailableOnNoContent(t *testing.T) {
+	var stdout bytes.Buffer
+	client := fakeWorkerClient{
+		getTaskFunc: func(context.Context, string) (*Assignment, error) {
+			return nil, &StatusError{StatusCode: http.StatusNoContent, Message: "No Content"}
+		},
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called when no task is available")
+			return nil, nil
+		},
+	}
+
+	result, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "claude"}, WorkerOptions{
+		Output:      &stdout,
+		ErrorOutput: &bytes.Buffer{},
+	})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if result.AgentHealthy {
+		t.Fatal("expected no-task cycle to be neutral, not an agent-health signal")
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("no task available")) {
+		t.Fatalf("expected no-task log, got %q", stdout.String())
+	}
+}
+
+func TestRunWorkerCycleRejectsInvalidAssignmentPayload(t *testing.T) {
+	client := fakeWorkerClient{
+		getTaskFunc: func(context.Context, string) (*Assignment, error) {
+			return &Assignment{}, nil
+		},
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called for invalid assignments")
+			return nil, nil
+		},
+	}
+
+	_, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "claude"}, WorkerOptions{
+		Output:      &bytes.Buffer{},
+		ErrorOutput: &bytes.Buffer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid assignment payload") {
+		t.Fatalf("expected invalid assignment error, got %v", err)
 	}
 }
 
