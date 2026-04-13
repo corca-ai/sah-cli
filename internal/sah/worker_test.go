@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,5 +181,52 @@ func TestRunWorkerCycleUsesClearOpenAssignmentMessage(t *testing.T) {
 	}
 	if !bytes.Contains(stdout.Bytes(), []byte("Too many open assignments")) {
 		t.Fatalf("expected clear cap message, got %q", stdout.String())
+	}
+}
+
+func TestRunWorkerCycleReleasesAssignmentAfterSubmitFailure(t *testing.T) {
+	previous := solveAssignment
+	t.Cleanup(func() {
+		solveAssignment = previous
+	})
+
+	solveAssignment = func(
+		ctx context.Context,
+		assignment Assignment,
+		options AgentRunOptions,
+	) (*AgentResult, error) {
+		return &AgentResult{
+			Payload: map[string]any{"verdict": "approve", "reason": "grounded"},
+		}, nil
+	}
+
+	var released []int64
+	client := fakeWorkerClient{
+		getTaskFunc: func(context.Context, string) (*Assignment, error) {
+			return &Assignment{
+				AssignmentID: 88,
+				TaskType:     "verification",
+				TaskKey:      "verification",
+				Payload:      map[string]any{"title": "Paper"},
+			}, nil
+		},
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			return nil, errors.New("network timeout")
+		},
+		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
+			released = append(released, assignment.AssignmentID)
+			return nil
+		},
+	}
+
+	_, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "codex"}, WorkerOptions{
+		Output:      &bytes.Buffer{},
+		ErrorOutput: &bytes.Buffer{},
+	})
+	if err == nil || !strings.Contains(err.Error(), "submit assignment 88") {
+		t.Fatalf("expected submit assignment error, got %v", err)
+	}
+	if len(released) != 1 || released[0] != 88 {
+		t.Fatalf("expected assignment 88 to be released, got %v", released)
 	}
 }

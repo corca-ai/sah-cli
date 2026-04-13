@@ -226,6 +226,7 @@ func runWorkerCycle(
 
 	response, err := client.SubmitAssignment(ctx, *assignment, result.Payload)
 	if err != nil {
+		releaseAssignmentOnFailure(client, *assignment, options)
 		return WorkerCycleResult{AgentHealthy: true}, fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
 	}
 
