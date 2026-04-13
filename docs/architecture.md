@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`sah` is the SCIENCE@home CLI worker for macOS. It authenticates a contributor account, polls for assignments, runs a local coding agent CLI in a restricted empty workspace, and submits the resulting JSON payload.
+`sah` is the SCIENCE@home CLI worker for macOS and Linux. It authenticates a contributor account, polls for assignments, runs a local coding agent CLI in a restricted empty workspace, and submits the resulting JSON payload.
 
 ## Auth Flow
 
@@ -12,7 +12,7 @@
 4. `sah` exchanges that code for the contributor API key through `POST /api/cli/exchange`.
 5. `sah` stores the API key in the local config file with user-only permissions.
 
-The browser never receives the raw contributor API key. The local CLI proves possession with a verifier generated before the browser is opened.
+The browser never receives the raw contributor API key. The local CLI proves possession with a verifier generated before the browser is opened. On Linux, `sah` respects `BROWSER`, so remote sessions can use text browsers such as `w3m` or `lynx`.
 
 ## Worker Loop
 
@@ -38,13 +38,17 @@ This keeps the CLI forward-compatible with new task families. As long as the ser
 
 ## Local Files
 
-- Config: `~/Library/Application Support/sah/config.json`
-- Daemon logs: `~/Library/Logs/sah/daemon.stdout.log` and `~/Library/Logs/sah/daemon.stderr.log`
-- Launchd capture fallback: `~/Library/Logs/sah/stdout.log` and `~/Library/Logs/sah/stderr.log`
-- LaunchAgent plist: `~/Library/LaunchAgents/ai.borca.sah.plist`
+- macOS config: `~/Library/Application Support/sah/config.json`
+- Linux config: `$XDG_CONFIG_HOME/sah/config.json` or `~/.config/sah/config.json`
+- macOS daemon logs: `~/Library/Logs/sah/daemon.stdout.log` and `~/Library/Logs/sah/daemon.stderr.log`
+- Linux daemon logs: `$XDG_STATE_HOME/sah/daemon.stdout.log` and `daemon.stderr.log`, or `~/.local/state/sah/`
+- macOS LaunchAgent plist: `~/Library/LaunchAgents/ai.borca.sah.plist`
+- Linux systemd user unit: `$XDG_CONFIG_HOME/systemd/user/ai.borca.sah.service` or `~/.config/systemd/user/ai.borca.sah.service`
 
 ## Daemon Mode
 
-`sah daemon install` writes a per-user `launchd` plist, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, bootstraps it, and starts it immediately. The daemon runs `sah run --daemon` from `~/Library/Application Support/sah`, so the service behavior is driven by the saved config defaults instead of the user's home directory.
+`sah daemon install` writes a per-user service definition, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, and starts it immediately. On macOS the service manager is `launchd`. On Linux it is `systemd --user`. The daemon runs `sah run --daemon` from the saved config directory, so the service behavior is driven by persisted config defaults instead of the shell's working directory.
 
-The worker writes its normal daemon output through an internal rotating logger. `daemon.stdout.log` rotates at 20 MB and `daemon.stderr.log` rotates at 10 MB, each keeping up to 5 older files before pruning the oldest backup.
+The worker writes its normal daemon output through an internal rotating logger. `daemon.stdout.log` rotates at 20 MB and `daemon.stderr.log` rotates at 10 MB, each keeping up to 5 older files before pruning the oldest backup. On Linux, `journalctl --user -u ai.borca.sah.service` is still useful for service-manager events around start and stop.
+
+On Linux, long-lived background execution across logout depends on `systemd --user` lingering being enabled for that account.

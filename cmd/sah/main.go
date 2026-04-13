@@ -87,7 +87,7 @@ Commands:
   auth login|logout|status   Authenticate and inspect local auth state
   run                        Run the foreground worker loop
   daemon install|start|stop|status|uninstall
-                             Manage the macOS launchd worker
+                             Manage the background worker service
   me                         Show your SCIENCE@home account summary
   contributions              Show recent submissions and reviews
   leaderboard                Show public rankings
@@ -204,7 +204,7 @@ func runCmd(args []string) error {
 	taskType := fs.String("task-type", "", "Optional task type filter")
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 	once := fs.Bool("once", false, "Run a single polling cycle and exit")
-	daemonMode := fs.Bool("daemon", false, "Run non-interactively for launchd")
+	daemonMode := fs.Bool("daemon", false, "Run non-interactively for the background service")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -381,15 +381,17 @@ func daemonInstallCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := sah.InstallLaunchAgent(paths, executable); err != nil {
+	if err := sah.InstallService(paths, executable); err != nil {
 		return err
 	}
 
-	fmt.Println("Installed and started SCIENCE@home launchd agent.")
-	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
+	fmt.Printf("Installed and started SCIENCE@home %s service.\n", sah.ServiceManagerName())
+	fmt.Printf("%s: %s\n", sah.ServiceDefinitionLabel(), sah.ServiceDefinitionPath(paths))
 	fmt.Printf("Daemon logs: %s and %s\n", paths.DaemonStdoutLog, paths.DaemonStderrLog)
-	fmt.Printf("Launchd capture: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
-	fmt.Println("Captured PATH, HOME, and installed agent binary paths for launchd. Re-run `sah daemon install` after changing agent install paths.")
+	if capture := sah.ServiceCaptureValue(paths); capture != "" {
+		fmt.Printf("%s: %s\n", sah.ServiceCaptureLabel(), capture)
+	}
+	fmt.Printf("Captured PATH, HOME, and installed agent binary paths for %s. Re-run `sah daemon install` after changing agent install paths.\n", sah.ServiceManagerName())
 	return nil
 }
 
@@ -474,24 +476,14 @@ func resolveExecutable() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}
-	executable, err = preferredLaunchdExecutable(executable)
+	executable, err = sah.PreferredServiceExecutable(executable)
 	if err != nil {
 		return "", err
 	}
 	return executable, nil
 }
 
-func preferredLaunchdExecutable(executable string) (string, error) {
-	cleaned := filepath.Clean(executable)
-	resolved, err := filepath.EvalSymlinks(cleaned)
-	if err != nil {
-		return "", fmt.Errorf("resolve executable symlink: %w", err)
-	}
-
-	return selectLaunchdExecutable(resolved, []string{"/opt/homebrew/bin/sah", "/usr/local/bin/sah"})
-}
-
-func selectLaunchdExecutable(resolved string, candidates []string) (string, error) {
+func selectLaunchdExecutable(resolved string, candidates []string) string {
 	if canonical, err := filepath.EvalSymlinks(resolved); err == nil {
 		resolved = canonical
 	}
@@ -502,11 +494,11 @@ func selectLaunchdExecutable(resolved string, candidates []string) (string, erro
 			continue
 		}
 		if filepath.Clean(target) == filepath.Clean(resolved) {
-			return candidate, nil
+			return candidate
 		}
 	}
 
-	return filepath.Clean(resolved), nil
+	return filepath.Clean(resolved)
 }
 
 func daemonStartCmd() error {
@@ -514,34 +506,29 @@ func daemonStartCmd() error {
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(paths.LaunchAgentPlist); err != nil {
+	if _, err := os.Stat(sah.ServiceDefinitionPath(paths)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("launchd agent is not installed")
+			return fmt.Errorf("%s service is not installed", sah.ServiceManagerName())
 		}
 		return err
 	}
 
-	loaded, _, err := sah.LaunchAgentStatus()
-	if err != nil {
+	if err := sah.StartService(paths); err != nil {
 		return err
 	}
-	if !loaded {
-		if err := sah.BootstrapLaunchAgent(paths); err != nil {
-			return err
-		}
-	}
-	if err := sah.StartLaunchAgent(); err != nil {
-		return err
-	}
-	fmt.Println("Started SCIENCE@home launchd agent.")
+	fmt.Printf("Started SCIENCE@home %s service.\n", sah.ServiceManagerName())
 	return nil
 }
 
 func daemonStopCmd() error {
-	if err := sah.StopLaunchAgent(); err != nil {
+	paths, _, err := loadConfig()
+	if err != nil {
 		return err
 	}
-	fmt.Println("Stopped SCIENCE@home launchd agent.")
+	if err := sah.StopService(paths); err != nil {
+		return err
+	}
+	fmt.Printf("Stopped SCIENCE@home %s service.\n", sah.ServiceManagerName())
 	return nil
 }
 
@@ -551,7 +538,7 @@ func daemonStatusCmd() error {
 		return err
 	}
 
-	loaded, _, err := sah.LaunchAgentStatus()
+	loaded, detail, err := sah.ServiceStatus(paths)
 	if err != nil {
 		return err
 	}
@@ -565,14 +552,12 @@ func daemonStatusCmd() error {
 		fmt.Printf("Per-agent models: %s\n", models)
 	}
 	fmt.Printf("Interval: %s\n", config.PollInterval)
-	if loaded {
-		fmt.Println("Launchd: loaded")
-	} else {
-		fmt.Println("Launchd: not loaded")
-	}
-	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
+	fmt.Printf("%s: %s\n", sah.ServiceStatusLabel(), formatServiceState(loaded, detail))
+	fmt.Printf("%s: %s\n", sah.ServiceDefinitionLabel(), sah.ServiceDefinitionPath(paths))
 	fmt.Printf("Daemon logs: %s\n", strings.Join([]string{paths.DaemonStdoutLog, paths.DaemonStderrLog}, " and "))
-	fmt.Printf("Launchd capture: %s\n", strings.Join([]string{paths.LaunchAgentStdout, paths.LaunchAgentStderr}, " and "))
+	if capture := sah.ServiceCaptureValue(paths); capture != "" {
+		fmt.Printf("%s: %s\n", sah.ServiceCaptureLabel(), capture)
+	}
 	return nil
 }
 
@@ -581,11 +566,40 @@ func daemonUninstallCmd() error {
 	if err != nil {
 		return err
 	}
-	if err := sah.UninstallLaunchAgent(paths); err != nil {
+	if err := sah.UninstallService(paths); err != nil {
 		return err
 	}
-	fmt.Println("Removed SCIENCE@home launchd agent.")
+	fmt.Printf("Removed SCIENCE@home %s service.\n", sah.ServiceManagerName())
 	return nil
+}
+
+func formatServiceState(loaded bool, detail string) string {
+	trimmed := strings.TrimSpace(detail)
+	if trimmed != "" {
+		switch sah.ServiceManagerName() {
+		case "launchd":
+			if loaded {
+				return "loaded"
+			}
+			return "not loaded"
+		default:
+			return trimmed
+		}
+	}
+	if loaded {
+		switch sah.ServiceManagerName() {
+		case "launchd":
+			return "loaded"
+		default:
+			return "active"
+		}
+	}
+	switch sah.ServiceManagerName() {
+	case "launchd":
+		return "not loaded"
+	default:
+		return "inactive"
+	}
 }
 
 func meCmd(args []string) error {

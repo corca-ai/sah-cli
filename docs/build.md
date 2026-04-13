@@ -37,9 +37,24 @@ sah me
 sah daemon install
 ```
 
-`sah daemon install` both installs and starts the `launchd` agent. Use `sah daemon start` only after a manual `stop` or after logging back into macOS.
+`sah daemon install` both installs and starts the per-user background service. Use `sah daemon start` only after a manual `stop` or after logging back into the relevant service manager session.
 
-If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, re-run `sah daemon install` from a shell where that agent is already on `PATH`. The install command captures the current shell environment for `launchd`, stores absolute agent binary paths, and runs the daemon from `~/Library/Application Support/sah` instead of `HOME`.
+On Linux, `sah daemon install` writes a per-user `systemd --user` unit and restarts it immediately. On macOS, it writes a per-user `launchd` plist and bootstraps it immediately.
+
+If you want the Linux user service to keep running without an active login session, enable lingering first:
+
+```sh
+loginctl enable-linger "$USER"
+```
+
+If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, re-run `sah daemon install` from a shell where that agent is already on `PATH`. The install command captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
+
+For remote Linux sessions, you can use a text browser during auth:
+
+```sh
+export BROWSER=w3m
+sah auth login
+```
 
 ## Test
 
@@ -72,7 +87,7 @@ The hook runs:
 
 ## Release
 
-Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
+Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
 
 ```sh
 git tag v0.5.0

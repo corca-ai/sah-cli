@@ -35,10 +35,7 @@ func TestPreferredLaunchdExecutableUsesStableHomebrewSymlink(t *testing.T) {
 		t.Fatalf("symlink stable binary: %v", err)
 	}
 
-	selected, err := selectLaunchdExecutable(cellarBinary, []string{stableBinary})
-	if err != nil {
-		t.Fatalf("selectLaunchdExecutable returned error: %v", err)
-	}
+	selected := selectLaunchdExecutable(cellarBinary, []string{stableBinary})
 	if selected != stableBinary {
 		t.Fatalf("expected stable symlink %q, got %q", stableBinary, selected)
 	}
@@ -51,10 +48,7 @@ func TestPreferredLaunchdExecutableFallsBackToResolvedBinary(t *testing.T) {
 		t.Fatalf("write binary: %v", err)
 	}
 
-	selected, err := selectLaunchdExecutable(binary, nil)
-	if err != nil {
-		t.Fatalf("selectLaunchdExecutable returned error: %v", err)
-	}
+	selected := selectLaunchdExecutable(binary, nil)
 	expected, err := filepath.EvalSymlinks(binary)
 	if err != nil {
 		t.Fatalf("resolve binary symlink: %v", err)

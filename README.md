@@ -1,6 +1,6 @@
 # sah-cli
 
-SCIENCE@home background contribution CLI for macOS.
+SCIENCE@home background contribution CLI for macOS and Linux.
 
 ## Install
 
@@ -29,9 +29,17 @@ For always-on background work:
 sah daemon install
 ```
 
-`sah daemon install` installs and starts the per-user `launchd` agent immediately. It captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, then runs from `~/Library/Application Support/sah` instead of your home directory. Re-run it after moving `codex`, `gemini`, `claude`, or `qwen`.
+`sah daemon install` installs and starts the per-user background service immediately. On macOS it uses `launchd`. On Linux it uses `systemd --user`. In both cases it captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries. Re-run it after moving `codex`, `gemini`, `claude`, or `qwen`.
 
-Daemon worker logs are written to `~/Library/Logs/sah/daemon.stdout.log` and `~/Library/Logs/sah/daemon.stderr.log` with automatic size-based rotation.
+On Linux, if you want the user service to survive logout and reboot without an active login session, enable lingering for that user with `loginctl enable-linger`.
+
+Daemon worker logs are written through an internal rotating logger. On macOS they live under `~/Library/Logs/sah/`. On Linux they live under `$XDG_STATE_HOME/sah/` or `~/.local/state/sah/`.
+
+For remote Linux sessions, set `BROWSER` to a text browser before `sah auth login`, for example:
+
+```sh
+export BROWSER=w3m
+```
 
 ## Documentation
 

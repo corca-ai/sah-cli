@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ const (
 	DefaultPollInterval   = 15 * time.Minute
 	DefaultAgentTimeout   = 10 * time.Minute
 	DefaultLaunchdLabel   = "ai.borca.sah"
+	DefaultSystemdUnit    = DefaultLaunchdLabel + ".service"
 	DefaultLaunchdCommand = "run"
 )
 
@@ -40,6 +42,8 @@ type Paths struct {
 	LaunchAgentPlist  string
 	LaunchAgentStdout string
 	LaunchAgentStderr string
+	SystemdUserDir    string
+	SystemdUnitFile   string
 	DaemonStdoutLog   string
 	DaemonStderrLog   string
 }
@@ -64,20 +68,60 @@ func ResolvePaths() (Paths, error) {
 		return Paths{}, fmt.Errorf("resolve home dir: %w", err)
 	}
 
+	return resolvePaths(runtime.GOOS, configRoot, homeDir, os.Getenv), nil
+}
+
+func resolvePaths(
+	goos string,
+	configRoot string,
+	homeDir string,
+	getenv func(string) string,
+) Paths {
 	configDir := filepath.Join(configRoot, "sah")
-	logsDir := filepath.Join(homeDir, "Library", "Logs", "sah")
-	launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
-	return Paths{
-		ConfigDir:         configDir,
-		ConfigFile:        filepath.Join(configDir, "config.json"),
-		LogsDir:           logsDir,
-		LaunchAgentsDir:   launchAgentsDir,
-		LaunchAgentPlist:  filepath.Join(launchAgentsDir, DefaultLaunchdLabel+".plist"),
-		LaunchAgentStdout: filepath.Join(logsDir, "stdout.log"),
-		LaunchAgentStderr: filepath.Join(logsDir, "stderr.log"),
-		DaemonStdoutLog:   filepath.Join(logsDir, "daemon.stdout.log"),
-		DaemonStderrLog:   filepath.Join(logsDir, "daemon.stderr.log"),
-	}, nil
+	logsDir := resolveLogsDir(goos, configRoot, homeDir, getenv)
+
+	paths := Paths{
+		ConfigDir:       configDir,
+		ConfigFile:      filepath.Join(configDir, "config.json"),
+		LogsDir:         logsDir,
+		DaemonStdoutLog: filepath.Join(logsDir, "daemon.stdout.log"),
+		DaemonStderrLog: filepath.Join(logsDir, "daemon.stderr.log"),
+	}
+
+	switch goos {
+	case "darwin":
+		launchAgentsDir := filepath.Join(homeDir, "Library", "LaunchAgents")
+		paths.LaunchAgentsDir = launchAgentsDir
+		paths.LaunchAgentPlist = filepath.Join(launchAgentsDir, DefaultLaunchdLabel+".plist")
+		paths.LaunchAgentStdout = filepath.Join(logsDir, "stdout.log")
+		paths.LaunchAgentStderr = filepath.Join(logsDir, "stderr.log")
+	case "linux":
+		systemdUserDir := filepath.Join(configRoot, "systemd", "user")
+		paths.SystemdUserDir = systemdUserDir
+		paths.SystemdUnitFile = filepath.Join(systemdUserDir, DefaultSystemdUnit)
+	}
+
+	return paths
+}
+
+func resolveLogsDir(
+	goos string,
+	configRoot string,
+	homeDir string,
+	getenv func(string) string,
+) string {
+	switch goos {
+	case "darwin":
+		return filepath.Join(homeDir, "Library", "Logs", "sah")
+	case "linux":
+		stateRoot := strings.TrimSpace(getenv("XDG_STATE_HOME"))
+		if stateRoot == "" {
+			stateRoot = filepath.Join(homeDir, ".local", "state")
+		}
+		return filepath.Join(stateRoot, "sah")
+	default:
+		return filepath.Join(configRoot, "sah", "logs")
+	}
 }
 
 func LoadConfig(paths Paths) (Config, error) {

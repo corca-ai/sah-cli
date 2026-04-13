@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -154,18 +155,54 @@ func challengeForVerifier(verifier string) string {
 }
 
 func openBrowser(rawURL string) error {
-	var command *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		command = exec.Command("open", rawURL)
-	case "linux":
-		command = exec.Command("xdg-open", rawURL)
-	default:
-		return fmt.Errorf("automatic browser open is unsupported on %s", runtime.GOOS)
+	command, err := browserCommand(rawURL, runtime.GOOS, os.Getenv)
+	if err != nil {
+		return err
 	}
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func browserCommand(rawURL string, goos string, getenv func(string) string) (*exec.Cmd, error) {
+	if browser := strings.TrimSpace(getenv("BROWSER")); browser != "" {
+		args, err := browserCommandArgs(browser, rawURL)
+		if err != nil {
+			return nil, err
+		}
+		return exec.Command(args[0], args[1:]...), nil
+	}
+
+	switch goos {
+	case "darwin":
+		return exec.Command("open", rawURL), nil
+	case "linux":
+		return exec.Command("xdg-open", rawURL), nil
+	default:
+		return nil, fmt.Errorf("automatic browser open is unsupported on %s", goos)
+	}
+}
+
+func browserCommandArgs(browser string, rawURL string) ([]string, error) {
+	for _, candidate := range strings.Split(browser, ":") {
+		fields := strings.Fields(strings.TrimSpace(candidate))
+		if len(fields) == 0 {
+			continue
+		}
+
+		replaced := false
+		for index, field := range fields {
+			if strings.Contains(field, "%s") {
+				fields[index] = strings.ReplaceAll(field, "%s", rawURL)
+				replaced = true
+			}
+		}
+		if !replaced {
+			fields = append(fields, rawURL)
+		}
+		return fields, nil
+	}
+	return nil, fmt.Errorf("BROWSER did not contain a runnable command")
 }
