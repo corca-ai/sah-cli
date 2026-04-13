@@ -40,6 +40,8 @@ type Paths struct {
 	LaunchAgentPlist  string
 	LaunchAgentStdout string
 	LaunchAgentStderr string
+	DaemonStdoutLog   string
+	DaemonStderrLog   string
 }
 
 func DefaultConfig() Config {
@@ -73,6 +75,8 @@ func ResolvePaths() (Paths, error) {
 		LaunchAgentPlist:  filepath.Join(launchAgentsDir, DefaultLaunchdLabel+".plist"),
 		LaunchAgentStdout: filepath.Join(logsDir, "stdout.log"),
 		LaunchAgentStderr: filepath.Join(logsDir, "stderr.log"),
+		DaemonStdoutLog:   filepath.Join(logsDir, "daemon.stdout.log"),
+		DaemonStderrLog:   filepath.Join(logsDir, "daemon.stderr.log"),
 	}, nil
 }
 

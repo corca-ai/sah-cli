@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -21,6 +22,24 @@ import (
 var version = "dev"
 
 const leaderboardVisibleRows = 15
+
+type reportedError struct {
+	err error
+}
+
+func (err *reportedError) Error() string {
+	if err == nil || err.err == nil {
+		return ""
+	}
+	return err.err.Error()
+}
+
+func (err *reportedError) Unwrap() error {
+	if err == nil {
+		return nil
+	}
+	return err.err
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -53,7 +72,10 @@ func main() {
 	}
 
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sah: %v\n", err)
+		var reported *reportedError
+		if !errors.As(err, &reported) {
+			fmt.Fprintf(os.Stderr, "sah: %v\n", err)
+		}
 		os.Exit(1)
 	}
 }
@@ -204,9 +226,34 @@ func runCmd(args []string) error {
 		config.BaseURL = *baseURL
 	}
 
+	outputWriter := io.Writer(os.Stdout)
+	errorWriter := io.Writer(os.Stderr)
+	report := func(runErr error) error {
+		return runErr
+	}
+	if *daemonMode {
+		daemonLogs, err := sah.OpenDaemonLogs(paths)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			_ = daemonLogs.Close()
+		}()
+
+		outputWriter = daemonLogs.Stdout
+		errorWriter = daemonLogs.Stderr
+		report = func(runErr error) error {
+			if runErr == nil {
+				return nil
+			}
+			_, _ = fmt.Fprintf(errorWriter, "[%s] sah: %v\n", time.Now().Format(time.RFC3339), runErr)
+			return &reportedError{err: runErr}
+		}
+	}
+
 	if strings.TrimSpace(config.APIKey) == "" {
 		if *daemonMode {
-			return fmt.Errorf("daemon mode requires an existing API key; run `sah auth login` first")
+			return report(fmt.Errorf("daemon mode requires an existing API key; run `sah auth login` first"))
 		}
 		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
 			return err
@@ -220,7 +267,7 @@ func runCmd(args []string) error {
 
 	if strings.TrimSpace(*agent) != "" {
 		if _, err := sah.ResolveAgentWithBinaryPaths(*agent, binaryPaths); err != nil {
-			return err
+			return report(err)
 		}
 	}
 	agentPool := sah.ParseAgentList(*agents)
@@ -229,21 +276,21 @@ func runCmd(args []string) error {
 			Agents:      agentPool,
 			BinaryPaths: binaryPaths,
 		}); err != nil {
-			return err
+			return report(err)
 		}
 	}
 	agentModels, err := sah.ParseAgentModels(*models)
 	if err != nil {
-		return err
+		return report(err)
 	}
 
 	pollInterval, err := sah.ParsePollInterval(pickString(*interval, config.PollInterval))
 	if err != nil {
-		return err
+		return report(err)
 	}
 	agentTimeout, err := sah.ParseAgentTimeout(pickString(*timeout, config.AgentTimeout))
 	if err != nil {
-		return err
+		return report(err)
 	}
 
 	options := sah.WorkerOptions{
@@ -257,19 +304,19 @@ func runCmd(args []string) error {
 		Timeout:         agentTimeout,
 		TaskType:        strings.TrimSpace(*taskType),
 		Once:            *once,
-		Output:          os.Stdout,
-		ErrorOutput:     os.Stderr,
+		Output:          outputWriter,
+		ErrorOutput:     errorWriter,
 	}
 
 	picker, err := sah.NewAgentPicker(config, options)
 	if err != nil {
-		return err
+		return report(err)
 	}
 	if !*daemonMode {
 		sah.PrintRunPlan(os.Stdout, config, options, picker.Pool())
 	}
 
-	return sah.RunWorker(ctx, config, options)
+	return report(sah.RunWorker(ctx, config, options))
 }
 
 func daemonCmd(args []string) error {
@@ -340,7 +387,8 @@ func daemonInstallCmd(args []string) error {
 
 	fmt.Println("Installed and started SCIENCE@home launchd agent.")
 	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
-	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+	fmt.Printf("Daemon logs: %s and %s\n", paths.DaemonStdoutLog, paths.DaemonStderrLog)
+	fmt.Printf("Launchd capture: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
 	fmt.Println("Captured PATH, HOME, and installed agent binary paths for launchd. Re-run `sah daemon install` after changing agent install paths.")
 	return nil
 }
@@ -523,7 +571,8 @@ func daemonStatusCmd() error {
 		fmt.Println("Launchd: not loaded")
 	}
 	fmt.Printf("Plist: %s\n", paths.LaunchAgentPlist)
-	fmt.Printf("Logs: %s and %s\n", paths.LaunchAgentStdout, paths.LaunchAgentStderr)
+	fmt.Printf("Daemon logs: %s\n", strings.Join([]string{paths.DaemonStdoutLog, paths.DaemonStderrLog}, " and "))
+	fmt.Printf("Launchd capture: %s\n", strings.Join([]string{paths.LaunchAgentStdout, paths.LaunchAgentStderr}, " and "))
 	return nil
 }
 

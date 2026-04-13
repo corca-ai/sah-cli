@@ -39,9 +39,12 @@ This keeps the CLI forward-compatible with new task families. As long as the ser
 ## Local Files
 
 - Config: `~/Library/Application Support/sah/config.json`
-- Logs: `~/Library/Logs/sah/`
+- Daemon logs: `~/Library/Logs/sah/daemon.stdout.log` and `~/Library/Logs/sah/daemon.stderr.log`
+- Launchd capture fallback: `~/Library/Logs/sah/stdout.log` and `~/Library/Logs/sah/stderr.log`
 - LaunchAgent plist: `~/Library/LaunchAgents/ai.borca.sah.plist`
 
 ## Daemon Mode
 
 `sah daemon install` writes a per-user `launchd` plist, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, bootstraps it, and starts it immediately. The daemon runs `sah run --daemon` from `~/Library/Application Support/sah`, so the service behavior is driven by the saved config defaults instead of the user's home directory.
+
+The worker writes its normal daemon output through an internal rotating logger. `daemon.stdout.log` rotates at 20 MB and `daemon.stderr.log` rotates at 10 MB, each keeping up to 5 older files before pruning the oldest backup.

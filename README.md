@@ -31,6 +31,8 @@ sah daemon install
 
 `sah daemon install` installs and starts the per-user `launchd` agent immediately. It captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, then runs from `~/Library/Application Support/sah` instead of your home directory. Re-run it after moving `codex`, `gemini`, `claude`, or `qwen`.
 
+Daemon worker logs are written to `~/Library/Logs/sah/daemon.stdout.log` and `~/Library/Logs/sah/daemon.stderr.log` with automatic size-based rotation.
+
 ## Documentation
 
 - [Agent Guide](AGENTS.md)
