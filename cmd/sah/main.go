@@ -401,6 +401,8 @@ func daemonInstallCmd(args []string) error {
 		fmt.Printf("%s: %s\n", sah.ServiceCaptureLabel(), capture)
 	}
 	fmt.Printf("Captured PATH, HOME, and installed agent binary paths for %s. Re-run `sah daemon install` after changing agent install paths.\n", sah.ServiceManagerName())
+	fmt.Println()
+	printDaemonWelcome(config.BaseURL)
 	return nil
 }
 
@@ -829,6 +831,21 @@ func authedClient(config sah.Config) (*sah.Client, error) {
 		return nil, fmt.Errorf("not authenticated; run `sah auth login` first")
 	}
 	return sah.NewClient(config.BaseURL, config.APIKey), nil
+}
+
+func sciHomeURL(baseURL string) string {
+	trimmed := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	if trimmed == "" {
+		return sah.DefaultBaseURL
+	}
+	return trimmed
+}
+
+func printDaemonWelcome(baseURL string) {
+	homeURL := sciHomeURL(baseURL)
+	fmt.Println("Welcome to SCIENCE@home. This machine is now linked and the background worker is running.")
+	fmt.Printf("The home dashboard at %s will switch over after your first task is claimed.\n", homeURL)
+	fmt.Println("Useful follow-ups: `sah daemon status`, `sah contributions`, and `sah leaderboard`.")
 }
 
 func printHistorySection(title string, entries []sah.HistoryEntry) {

@@ -62,7 +62,7 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 
 	callbacks := make(chan callbackResult, 1)
 	server := &http.Server{
-		Handler: buildCallbackMux(state, callbacks),
+		Handler: buildCallbackMux(state, baseURL, callbacks),
 	}
 	defer func() {
 		_ = server.Shutdown(context.Background())
@@ -106,37 +106,58 @@ func buildAuthorizeURL(baseURL, state, redirectURI, challenge string) (string, e
 	return endpoint.String(), nil
 }
 
-func buildCallbackMux(expectedState string, callbacks chan<- callbackResult) *http.ServeMux {
+func buildCallbackMux(expectedState string, baseURL string, callbacks chan<- callbackResult) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(writer http.ResponseWriter, request *http.Request) {
 		state := request.URL.Query().Get("state")
 		code := request.URL.Query().Get("code")
 		if state == "" || code == "" {
-			writeCallbackPage(writer, "SCIENCE@home login failed", "Missing callback parameters.")
+			writeCallbackPage(writer, "SCIENCE@home login failed", "Missing callback parameters.", "")
 			callbacks <- callbackResult{Err: fmt.Errorf("callback was missing code or state")}
 			return
 		}
 		if state != expectedState {
-			writeCallbackPage(writer, "SCIENCE@home login failed", "State mismatch.")
+			writeCallbackPage(writer, "SCIENCE@home login failed", "State mismatch.", "")
 			callbacks <- callbackResult{Err: fmt.Errorf("callback state mismatch")}
 			return
 		}
 
-		writeCallbackPage(writer, "SCIENCE@home login complete", "You can close this tab and return to the terminal.")
+		writeCallbackPage(
+			writer,
+			"SCIENCE@home login complete",
+			"Browser sign-in is complete. Redirecting you back to SCIENCE@home...",
+			baseURL,
+		)
 		callbacks <- callbackResult{Code: code}
 	})
 	return mux
 }
 
-func writeCallbackPage(writer http.ResponseWriter, title string, body string) {
+func writeCallbackPage(writer http.ResponseWriter, title string, body string, redirectURL string) {
 	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	writer.WriteHeader(http.StatusOK)
+
+	redirectMeta := ""
+	redirectBody := ""
+	if strings.TrimSpace(redirectURL) != "" {
+		redirectMeta = fmt.Sprintf(
+			"<meta http-equiv=\"refresh\" content=\"1;url=%s\">",
+			html.EscapeString(redirectURL),
+		)
+		redirectBody = fmt.Sprintf(
+			"<p><a href=\"%s\">Return to SCIENCE@home</a></p>",
+			html.EscapeString(redirectURL),
+		)
+	}
+
 	_, _ = fmt.Fprintf(
 		writer,
-		"<!doctype html><html><head><meta charset=\"utf-8\"><title>%s</title></head><body><h1>%s</h1><p>%s</p></body></html>",
+		"<!doctype html><html><head><meta charset=\"utf-8\">%s<title>%s</title></head><body><h1>%s</h1><p>%s</p>%s</body></html>",
+		redirectMeta,
 		html.EscapeString(title),
 		html.EscapeString(title),
 		html.EscapeString(body),
+		redirectBody,
 	)
 }
 
