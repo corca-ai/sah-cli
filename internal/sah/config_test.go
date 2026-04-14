@@ -10,6 +10,9 @@ func TestResolvePathsForDarwinUsesLibraryDirectories(t *testing.T) {
 	if got := paths.ConfigDir; got != "/Users/tester/Library/Application Support/sah" {
 		t.Fatalf("unexpected config dir: %q", got)
 	}
+	if got := paths.ReleaseCacheFile; got != "/Users/tester/Library/Application Support/sah/client-release.json" {
+		t.Fatalf("unexpected release cache file: %q", got)
+	}
 	if got := paths.LogsDir; got != "/Users/tester/Library/Logs/sah" {
 		t.Fatalf("unexpected logs dir: %q", got)
 	}
@@ -28,6 +31,9 @@ func TestResolvePathsForLinuxUsesXDGStateAndSystemdUserDir(t *testing.T) {
 
 	if got := paths.ConfigDir; got != "/home/tester/.config/sah" {
 		t.Fatalf("unexpected config dir: %q", got)
+	}
+	if got := paths.ReleaseCacheFile; got != "/home/tester/.config/sah/client-release.json" {
+		t.Fatalf("unexpected release cache file: %q", got)
 	}
 	if got := paths.LogsDir; got != "/home/tester/.local/state/sah" {
 		t.Fatalf("unexpected logs dir: %q", got)

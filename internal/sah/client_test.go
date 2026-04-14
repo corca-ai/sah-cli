@@ -15,6 +15,12 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 		if got := request.Header.Get("Accept"); got != "application/json" {
 			t.Fatalf("unexpected Accept header: %q", got)
 		}
+		if got := request.Header.Get(TaskProtocolHeader); got != SupportedTaskProtocol {
+			t.Fatalf("unexpected task protocol header: %q", got)
+		}
+		if got := request.Header.Get(ClientCapabilitiesHeader); got != SupportedClientCapabilitiesHeaderValue() {
+			t.Fatalf("unexpected capabilities header: %q", got)
+		}
 		writer.Header().Set(
 			"Link",
 			`</s@h/assignments/41/submission>; rel="submit", </s@h/assignments/41/release>; rel="release"`,
@@ -160,6 +166,37 @@ func TestGetTaskReturnsNoContentStatusError(t *testing.T) {
 	}
 	if assignment != nil {
 		t.Fatalf("expected nil assignment on 204, got %#v", assignment)
+	}
+}
+
+func TestGetMeDoesNotSendWorkerContractHeaders(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if got := request.Header.Get(TaskProtocolHeader); got != "" {
+			t.Fatalf("did not expect task protocol header, got %q", got)
+		}
+		if got := request.Header.Get(ClientCapabilitiesHeader); got != "" {
+			t.Fatalf("did not expect capabilities header, got %q", got)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"id": 1,
+			"email": "ada@example.com",
+			"name": "Ada",
+			"credits": 10,
+			"leaderboard_score": 10,
+			"trust": 1.0,
+			"created_at": "2026-04-14T00:00:00Z",
+			"rank": 1,
+			"pending_credits": 0
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "test-key")
+	if _, err := client.GetMe(context.Background()); err != nil {
+		t.Fatalf("GetMe returned error: %v", err)
 	}
 }
 

@@ -23,7 +23,7 @@ go build -o bin/sah ./cmd/sah
 For release builds, inject the version via `ldflags`.
 
 ```sh
-go build -trimpath -ldflags="-s -w -X main.version=v0.6.1" -o bin/sah ./cmd/sah
+go build -trimpath -ldflags="-s -w -X main.version=v0.7.0" -o bin/sah ./cmd/sah
 ```
 
 ## Run
@@ -97,8 +97,8 @@ The hook runs:
 Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
 
 ```sh
-git tag v0.6.1
-git push origin v0.6.1
+git tag v0.7.0
+git push origin v0.7.0
 ```
 
 Required repository secrets:

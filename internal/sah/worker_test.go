@@ -232,6 +232,54 @@ func TestRunWorkerCycleRejectsInvalidAssignmentPayload(t *testing.T) {
 	}
 }
 
+func TestRunWorkerCycleRejectsUnsupportedAssignmentProtocolAndReleases(t *testing.T) {
+	previous := solveAssignment
+	t.Cleanup(func() {
+		solveAssignment = previous
+	})
+
+	solveAssignment = func(
+		ctx context.Context,
+		assignment Assignment,
+		options AgentRunOptions,
+	) (*AgentResult, error) {
+		t.Fatal("SolveAssignment should not run for an unsupported worker contract")
+		return nil, nil
+	}
+
+	var released []int64
+	client := fakeWorkerClient{
+		getTaskFunc: func(context.Context, string) (*Assignment, error) {
+			return &Assignment{
+				AssignmentID:    91,
+				TaskType:        "verification",
+				TaskKey:         "verification",
+				ProtocolVersion: "2026-04-20",
+				Payload:         map[string]any{"title": "Paper"},
+			}, nil
+		},
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal("SubmitAssignment should not be called for an unsupported worker contract")
+			return nil, nil
+		},
+		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
+			released = append(released, assignment.AssignmentID)
+			return nil
+		},
+	}
+
+	_, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "claude"}, WorkerOptions{
+		Output:      &bytes.Buffer{},
+		ErrorOutput: &bytes.Buffer{},
+	})
+	if err == nil || !IsWorkerContractError(err) {
+		t.Fatalf("expected worker contract error, got %v", err)
+	}
+	if len(released) != 1 || released[0] != 91 {
+		t.Fatalf("expected assignment 91 to be released, got %v", released)
+	}
+}
+
 func TestRunWorkerCycleReleasesAssignmentAfterSubmitFailure(t *testing.T) {
 	previous := solveAssignment
 	t.Cleanup(func() {
@@ -276,5 +324,23 @@ func TestRunWorkerCycleReleasesAssignmentAfterSubmitFailure(t *testing.T) {
 	}
 	if len(released) != 1 || released[0] != 88 {
 		t.Fatalf("expected assignment 88 to be released, got %v", released)
+	}
+}
+
+func TestHandleWorkerCycleErrorPropagatesWorkerContractMismatchWithoutLogging(t *testing.T) {
+	var stderr bytes.Buffer
+	expected := &WorkerContractViolation{
+		RequiredTaskProtocolVersion:   "2026-04-20",
+		AdvertisedTaskProtocolVersion: SupportedTaskProtocol,
+	}
+
+	err := handleWorkerCycleError(NewAgentBackoff(time.Minute), expected, WorkerOptions{
+		ErrorOutput: &stderr,
+	})
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected worker contract error to propagate, got %v", err)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got %q", stderr.String())
 	}
 }

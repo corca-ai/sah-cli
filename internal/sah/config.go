@@ -37,6 +37,7 @@ type Config struct {
 type Paths struct {
 	ConfigDir         string
 	ConfigFile        string
+	ReleaseCacheFile  string
 	LogsDir           string
 	LaunchAgentsDir   string
 	LaunchAgentPlist  string
@@ -81,11 +82,12 @@ func resolvePaths(
 	logsDir := resolveLogsDir(goos, configRoot, homeDir, getenv)
 
 	paths := Paths{
-		ConfigDir:       configDir,
-		ConfigFile:      filepath.Join(configDir, "config.json"),
-		LogsDir:         logsDir,
-		DaemonStdoutLog: filepath.Join(logsDir, "daemon.stdout.log"),
-		DaemonStderrLog: filepath.Join(logsDir, "daemon.stderr.log"),
+		ConfigDir:        configDir,
+		ConfigFile:       filepath.Join(configDir, "config.json"),
+		ReleaseCacheFile: filepath.Join(configDir, "client-release.json"),
+		LogsDir:          logsDir,
+		DaemonStdoutLog:  filepath.Join(logsDir, "daemon.stdout.log"),
+		DaemonStderrLog:  filepath.Join(logsDir, "daemon.stderr.log"),
 	}
 
 	switch goos {

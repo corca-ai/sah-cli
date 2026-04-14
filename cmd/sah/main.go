@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -24,7 +25,9 @@ var version = "dev"
 const leaderboardVisibleRows = 15
 
 type reportedError struct {
-	err error
+	err     error
+	code    int
+	codeSet bool
 }
 
 func (err *reportedError) Error() string {
@@ -41,16 +44,38 @@ func (err *reportedError) Unwrap() error {
 	return err.err
 }
 
+func (err *reportedError) ExitCode() int {
+	if err == nil {
+		return 1
+	}
+	if err.codeSet {
+		return err.code
+	}
+	return 1
+}
+
 func main() {
+	sah.SetCLIVersion(version)
+
 	if len(os.Args) < 2 {
-		usage()
-		os.Exit(2)
+		printEntryExperience(os.Stdout, inspectCLIState())
+		return
 	}
 
+	if isHelpToken(os.Args[1]) {
+		printHelp(os.Stdout, strings.Join(os.Args[2:], " "), inspectCLIState())
+		return
+	}
+
+	commandKey := canonicalCommandKey(os.Args[1:])
+	if requiresSupportedWorkerContract(commandKey) {
+		if err := enforceSupportedWorkerContract(); err != nil {
+			printCommandFailure(os.Stderr, inspectCLIState(), commandKey, err)
+			os.Exit(1)
+		}
+	}
 	var err error
 	switch os.Args[1] {
-	case "help", "--help", "-h", "-help":
-		usage()
 	case "auth":
 		err = authCmd(os.Args[2:])
 	case "run":
@@ -65,53 +90,33 @@ func main() {
 		err = leaderboardCmd(os.Args[2:])
 	case "agents":
 		err = agentsCmd(os.Args[2:])
+	case "upgrade":
+		err = upgradeCmd(os.Args[2:])
 	case "version", "--version", "-version":
 		fmt.Println(version)
 	default:
-		unknownCmd(os.Args[1:])
+		printUnknownCommand(os.Stderr, os.Args[1], inspectCLIState())
+		os.Exit(2)
 	}
 
 	if err != nil {
 		var reported *reportedError
-		if !errors.As(err, &reported) {
-			fmt.Fprintf(os.Stderr, "sah: %v\n", err)
+		if errors.As(err, &reported) {
+			os.Exit(reported.ExitCode())
 		}
+		printCommandFailure(os.Stderr, inspectCLIState(), commandKey, err)
 		os.Exit(1)
+	}
+
+	if commandKey != "" && commandKey != "upgrade" {
+		printCommandSuccessHints(os.Stdout, inspectCLIState(), commandKey)
 	}
 }
 
-func usage() {
-	fmt.Fprintf(os.Stderr, `Usage: sah <command> [flags]
-
-Commands:
-  auth login|logout|status   Authenticate and inspect local auth state
-  run                        Run the foreground worker loop
-  daemon install|start|stop|status|uninstall
-                             Manage the background worker service
-  me                         Show your SCIENCE@home account summary
-  contributions              Show recent submissions and reviews
-  leaderboard                Show public rankings
-  agents                     Show supported local agent CLIs
-  version                    Print the build version
-
-Examples:
-  sah auth login
-  sah run --rotate-installed
-  sah run --agents codex,gemini,claude,qwen --models codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet
-  sah daemon install --agents codex,claude,qwen --interval 30m
-  sah me
-`)
-}
-
-func unknownCmd(args []string) {
-	fmt.Fprintf(os.Stderr, "sah: unknown command %q\n\n", args[0])
-	usage()
-	os.Exit(2)
-}
-
 func authCmd(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: sah auth login|logout|status")
+	if len(args) == 0 || isHelpToken(args[0]) {
+		printHelp(os.Stdout, "auth", inspectCLIState())
+		return &reportedError{code: 0, codeSet: true}
 	}
 
 	switch args[0] {
@@ -121,7 +126,7 @@ func authCmd(args []string) error {
 		baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 		noOpen := fs.Bool("no-open", false, "Print the auth URL without opening a browser")
 		if err := fs.Parse(args[1:]); err != nil {
-			return err
+			return handleFlagParseError(err)
 		}
 
 		ctx, cancel := signalContext()
@@ -187,7 +192,8 @@ func authCmd(args []string) error {
 			return err
 		}
 	default:
-		return fmt.Errorf("usage: sah auth login|logout|status")
+		printUnknownSubcommand(os.Stderr, "auth", args[0], inspectCLIState())
+		return &reportedError{code: 2, codeSet: true}
 	}
 }
 
@@ -206,7 +212,7 @@ func runCmd(args []string) error {
 	once := fs.Bool("once", false, "Run a single polling cycle and exit")
 	daemonMode := fs.Bool("daemon", false, "Run non-interactively for the background service")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return handleFlagParseError(err)
 	}
 	if err := validateAgentFlags(*agent, *agents, *rotateInstalled); err != nil {
 		return err
@@ -320,8 +326,9 @@ func runCmd(args []string) error {
 }
 
 func daemonCmd(args []string) error {
-	if len(args) == 0 {
-		return fmt.Errorf("usage: sah daemon install|start|stop|status|uninstall")
+	if len(args) == 0 || isHelpToken(args[0]) {
+		printHelp(os.Stdout, "daemon", inspectCLIState())
+		return &reportedError{code: 0, codeSet: true}
 	}
 
 	switch args[0] {
@@ -336,7 +343,8 @@ func daemonCmd(args []string) error {
 	case "uninstall":
 		return daemonUninstallCmd()
 	default:
-		return fmt.Errorf("usage: sah daemon install|start|stop|status|uninstall")
+		printUnknownSubcommand(os.Stderr, "daemon", args[0], inspectCLIState())
+		return &reportedError{code: 2, codeSet: true}
 	}
 }
 
@@ -421,7 +429,7 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	fs.StringVar(&options.baseURL, "base-url", "", "SCIENCE@home base URL")
 
 	if err := fs.Parse(args); err != nil {
-		return daemonInstallOptions{}, err
+		return daemonInstallOptions{}, handleFlagParseError(err)
 	}
 	if err := validateAgentFlags(options.agent, options.agents, options.rotateInstalled); err != nil {
 		return daemonInstallOptions{}, err
@@ -661,7 +669,7 @@ func meCmd(args []string) error {
 	fs.SetOutput(os.Stderr)
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return handleFlagParseError(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -699,7 +707,7 @@ func contributionsCmd(args []string) error {
 	limit := fs.Int("limit", 10, "How many recent items to fetch per category")
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return handleFlagParseError(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -734,7 +742,7 @@ func leaderboardCmd(args []string) error {
 	window := fs.String("window", "all", "all, weekly, monthly, all-time")
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
 	if err := fs.Parse(args); err != nil {
-		return err
+		return handleFlagParseError(err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -780,7 +788,7 @@ func agentsCmd(args []string) error {
 	fs := flag.NewFlagSet("agents", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
-		return err
+		return handleFlagParseError(err)
 	}
 
 	writer := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -793,6 +801,59 @@ func agentsCmd(args []string) error {
 		_, _ = fmt.Fprintf(writer, "%s\t%s\t%s\t%s\t--model / --models %s=<name>\n", status.Name, installed, status.Path, status.Description, status.Name)
 	}
 	return writer.Flush()
+}
+
+func upgradeCmd(args []string) error {
+	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	if err := fs.Parse(args); err != nil {
+		return handleFlagParseError(err)
+	}
+
+	paths, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+
+	status, _ := resolveReleaseStatus(paths, config.BaseURL)
+	install, err := detectInstallMethod()
+	if err != nil {
+		return err
+	}
+
+	if install.Kind != installMethodHomebrew {
+		fmt.Println("Automatic upgrade is only supported for Homebrew installs right now.")
+		fmt.Println("Upgrade this CLI using the same method you used to install it.")
+		if status != nil && strings.TrimSpace(status.UpgradeCommand) != "" {
+			fmt.Printf("Recommended command: %s\n", status.UpgradeCommand)
+		}
+		if status != nil && strings.TrimSpace(status.ReleaseNotesURL) != "" {
+			fmt.Printf("Release notes: %s\n", status.ReleaseNotesURL)
+		}
+		return &reportedError{code: 0, codeSet: true}
+	}
+
+	if status != nil && !status.DevelopmentBuild && !status.UpdateAvailable {
+		fmt.Printf("SCIENCE@home CLI is already current at %s.\n", displayVersion(status.CurrentVersion))
+		return &reportedError{code: 0, codeSet: true}
+	}
+
+	fmt.Printf("Running: %s\n", install.DisplayCommand)
+	command := exec.Command(install.Command[0], install.Command[1:]...)
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	command.Stdin = os.Stdin
+	if err := command.Run(); err != nil {
+		return fmt.Errorf("upgrade failed: %w", err)
+	}
+
+	fmt.Println("Upgrade command completed.")
+	fmt.Println("Run `sah version` in a fresh shell to confirm the installed version.")
+	if daemonInstalled(paths) {
+		fmt.Println("If the background worker is installed, restart it so it picks up the new binary.")
+		fmt.Println("Recommended commands: `sah daemon stop` and then `sah daemon start`.")
+	}
+	return &reportedError{code: 0, codeSet: true}
 }
 
 func loadConfig() (sah.Paths, sah.Config, error) {
@@ -845,7 +906,6 @@ func printDaemonWelcome(baseURL string) {
 	homeURL := sciHomeURL(baseURL)
 	fmt.Println("Welcome to SCIENCE@home. This machine is now linked and the background worker is running.")
 	fmt.Printf("The home dashboard at %s will switch over after your first task is claimed.\n", homeURL)
-	fmt.Println("Useful follow-ups: `sah daemon status`, `sah contributions`, and `sah leaderboard`.")
 }
 
 func printHistorySection(title string, entries []sah.HistoryEntry) {
@@ -994,6 +1054,36 @@ func validateAgentFlags(agent string, agents string, rotateInstalled bool) error
 	return nil
 }
 
+func handleFlagParseError(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return &reportedError{code: 0, codeSet: true}
+	}
+	return err
+}
+
 func signalContext() (context.Context, context.CancelFunc) {
 	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+}
+
+func requiresSupportedWorkerContract(commandKey string) bool {
+	switch commandKey {
+	case "run", "daemon install", "daemon start":
+		return true
+	default:
+		return false
+	}
+}
+
+func enforceSupportedWorkerContract() error {
+	paths, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	release, releaseErr := resolveClientRelease(paths, config.BaseURL)
+	if releaseErr == nil && release != nil {
+		if violation := sah.ResolveWorkerContractViolation(release); violation != nil {
+			return violation
+		}
+	}
+	return nil
 }

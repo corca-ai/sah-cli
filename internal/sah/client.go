@@ -19,6 +19,10 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type requestOptions struct {
+	WorkerContract bool
+}
+
 type StatusError struct {
 	StatusCode int
 	Message    string
@@ -54,7 +58,14 @@ func (client *Client) GetTask(ctx context.Context, taskType string) (*Assignment
 	}
 
 	var assignment Assignment
-	headers, err := client.doJSONWithHeaders(ctx, http.MethodGet, path, nil, &assignment)
+	headers, err := client.doJSONWithHeaders(
+		ctx,
+		http.MethodGet,
+		path,
+		nil,
+		&assignment,
+		requestOptions{WorkerContract: true},
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -69,7 +80,7 @@ func (client *Client) SubmitContribution(
 	request SubmitContributionRequest,
 ) (*SubmitContributionResponse, error) {
 	var response SubmitContributionResponse
-	if err := client.doJSON(ctx, http.MethodPost, "/s@h/contributions", request, &response); err != nil {
+	if err := client.doWorkerJSON(ctx, http.MethodPost, "/s@h/contributions", request, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -87,7 +98,7 @@ func (client *Client) SubmitAssignment(
 			"payload": payload,
 		}
 		var response SubmitContributionResponse
-		if err := client.doJSON(
+		if err := client.doWorkerJSON(
 			ctx,
 			linkMethodOrDefault(assignment.Links.Submit.Method, http.MethodPost),
 			href,
@@ -107,12 +118,12 @@ func (client *Client) SubmitAssignment(
 
 func (client *Client) ReleaseAssignment(ctx context.Context, assignmentID int64) error {
 	path := fmt.Sprintf("/s@h/assignments/%d/release", assignmentID)
-	return client.doJSON(ctx, http.MethodPost, path, nil, nil)
+	return client.doWorkerJSON(ctx, http.MethodPost, path, nil, nil)
 }
 
 func (client *Client) ReleaseOpenAssignment(ctx context.Context, assignment Assignment) error {
 	if href := strings.TrimSpace(assignment.Links.Release.Href); href != "" {
-		return client.doJSON(
+		return client.doWorkerJSON(
 			ctx,
 			linkMethodOrDefault(assignment.Links.Release.Method, http.MethodPost),
 			href,
@@ -148,6 +159,14 @@ func (client *Client) GetLeaderboard(ctx context.Context) (*LeaderboardResponse,
 	return &response, nil
 }
 
+func (client *Client) GetClientRelease(ctx context.Context) (*ClientReleaseResponse, error) {
+	var response ClientReleaseResponse
+	if err := client.doJSON(ctx, http.MethodGet, "/s@h/client-release", nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
 func ExchangeCLIAuthCode(
 	ctx context.Context,
 	baseURL string,
@@ -173,7 +192,25 @@ func (client *Client) doJSON(
 	body any,
 	out any,
 ) error {
-	_, err := client.doJSONWithHeaders(ctx, method, path, body, out)
+	_, err := client.doJSONWithHeaders(ctx, method, path, body, out, requestOptions{})
+	return err
+}
+
+func (client *Client) doWorkerJSON(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+	out any,
+) error {
+	_, err := client.doJSONWithHeaders(
+		ctx,
+		method,
+		path,
+		body,
+		out,
+		requestOptions{WorkerContract: true},
+	)
 	return err
 }
 
@@ -183,6 +220,7 @@ func (client *Client) doJSONWithHeaders(
 	path string,
 	body any,
 	out any,
+	options requestOptions,
 ) (http.Header, error) {
 	endpoint, err := client.resolveEndpoint(path)
 	if err != nil {
@@ -208,6 +246,16 @@ func (client *Client) doJSONWithHeaders(
 	request.Header.Set("Accept", "application/json")
 	if client.apiKey != "" {
 		request.Header.Set("X-API-Key", client.apiKey)
+	}
+	if options.WorkerContract {
+		request.Header.Set(TaskProtocolHeader, SupportedTaskProtocol)
+		if capabilities := SupportedClientCapabilitiesHeaderValue(); capabilities != "" {
+			request.Header.Set(ClientCapabilitiesHeader, capabilities)
+		}
+	}
+	if version := CLIVersion(); version != "" {
+		request.Header.Set("X-SAH-CLI-Version", version)
+		request.Header.Set("User-Agent", "sah/"+version)
 	}
 
 	response, err := client.httpClient.Do(request)

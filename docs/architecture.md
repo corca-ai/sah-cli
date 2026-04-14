@@ -28,6 +28,8 @@ This keeps the CLI forward-compatible with new task families. As long as the ser
 
 ## Commands
 
+- `sah`
+- `sah help [command]`
 - `sah auth login|logout|status`
 - `sah run`
 - `sah daemon install|start|stop|status|uninstall`
@@ -35,6 +37,11 @@ This keeps the CLI forward-compatible with new task families. As long as the ser
 - `sah contributions`
 - `sah leaderboard`
 - `sah agents`
+- `sah upgrade`
+
+The CLI treats `sah` itself as the discovery entrypoint. It derives a local journey state from auth, detected agent CLIs, and daemon status, then suggests the next likely command. Successful commands reuse the same state machine to suggest follow-up commands instead of ending at raw output only.
+
+Release discovery and worker-contract negotiation are described in [updates.md](updates.md).
 
 ## Local Files
 

@@ -132,6 +132,9 @@ func handleWorkerCycleError(backoff *AgentBackoff, err error, options WorkerOpti
 	if IsStatus(err, http.StatusUnauthorized) || IsStatus(err, http.StatusForbidden) {
 		return fmt.Errorf("api key rejected; run `sah auth login` again")
 	}
+	if IsWorkerContractError(err) {
+		return err
+	}
 
 	var agentFailure *AgentFailure
 	if errors.As(err, &agentFailure) {
@@ -201,6 +204,10 @@ func runWorkerCycle(
 			assignment.AssignmentID,
 			assignment.TaskType,
 		)
+	}
+	if err := ValidateAssignmentContract(*assignment); err != nil {
+		releaseAssignmentOnFailure(client, *assignment, options)
+		return WorkerCycleResult{}, fmt.Errorf("assignment %d: %w", assignment.AssignmentID, err)
 	}
 
 	logLine(
