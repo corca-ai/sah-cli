@@ -23,51 +23,99 @@ type LoginOptions struct {
 }
 
 func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, error) {
-	baseURL := normalizeBaseURL(options.BaseURL)
-	if baseURL == "" {
-		baseURL = DefaultBaseURL
-	}
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	baseURL := resolveLoginBaseURL(options.BaseURL)
+	listener, err := listenForLoginCallback()
 	if err != nil {
-		return nil, fmt.Errorf("listen for auth callback: %w", err)
+		return nil, err
 	}
 	defer func() {
 		_ = listener.Close()
 	}()
 
+	verifier, server, callbacks, err := prepareLoginFlow(listener, baseURL, options)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_ = server.Shutdown(context.Background())
+	}()
+	return awaitLoginExchange(ctx, baseURL, verifier, callbacks)
+}
+
+type callbackResult struct {
+	Code string
+	Err  error
+}
+
+func resolveLoginBaseURL(rawBaseURL string) string {
+	baseURL := normalizeBaseURL(rawBaseURL)
+	if baseURL == "" {
+		return DefaultBaseURL
+	}
+	return baseURL
+}
+
+func listenForLoginCallback() (net.Listener, error) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return nil, fmt.Errorf("listen for auth callback: %w", err)
+	}
+	return listener, nil
+}
+
+func prepareLoginFlow(
+	listener net.Listener,
+	baseURL string,
+	options LoginOptions,
+) (string, *http.Server, chan callbackResult, error) {
+	verifier, state, authURL, err := issueLoginRequest(listener, baseURL)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	announceLogin(options.Output, authURL, options.OpenBrowser)
+	server, callbacks := serveLoginCallbacks(listener, state, baseURL)
+	return verifier, server, callbacks, nil
+}
+
+func issueLoginRequest(listener net.Listener, baseURL string) (string, string, string, error) {
 	verifier, err := randomToken(32)
 	if err != nil {
-		return nil, fmt.Errorf("generate verifier: %w", err)
+		return "", "", "", fmt.Errorf("generate verifier: %w", err)
 	}
 	state, err := randomToken(32)
 	if err != nil {
-		return nil, fmt.Errorf("generate state: %w", err)
+		return "", "", "", fmt.Errorf("generate state: %w", err)
 	}
 
 	redirectURI := fmt.Sprintf("http://%s/callback", listener.Addr().String())
 	authURL, err := buildAuthorizeURL(baseURL, state, redirectURI, challengeForVerifier(verifier))
 	if err != nil {
-		return nil, err
+		return "", "", "", err
 	}
+	return verifier, state, authURL, nil
+}
 
-	_, _ = fmt.Fprintf(options.Output, "Open this link to authenticate:\n%s\n\n", authURL)
-	if options.OpenBrowser {
-		if err := openBrowser(authURL); err != nil {
-			_, _ = fmt.Fprintf(options.Output, "Could not open a browser automatically: %v\n", err)
-		} else {
-			_, _ = fmt.Fprintln(options.Output, "Opened your browser for SCIENCE@home login.")
-		}
+func announceLogin(output io.Writer, authURL string, openAutomatically bool) {
+	_, _ = fmt.Fprintf(output, "Open this link to authenticate:\n%s\n\n", authURL)
+	if !openAutomatically {
+		return
 	}
+	if err := openBrowser(authURL); err != nil {
+		_, _ = fmt.Fprintf(output, "Could not open a browser automatically: %v\n", err)
+		return
+	}
+	_, _ = fmt.Fprintln(output, "Opened your browser for SCIENCE@home login.")
+}
 
+func serveLoginCallbacks(
+	listener net.Listener,
+	expectedState string,
+	baseURL string,
+) (*http.Server, chan callbackResult) {
 	callbacks := make(chan callbackResult, 1)
 	server := &http.Server{
-		Handler: buildCallbackMux(state, baseURL, callbacks),
+		Handler: buildCallbackMux(expectedState, baseURL, callbacks),
 	}
-	defer func() {
-		_ = server.Shutdown(context.Background())
-	}()
-
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			select {
@@ -76,7 +124,15 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 			}
 		}
 	}()
+	return server, callbacks
+}
 
+func awaitLoginExchange(
+	ctx context.Context,
+	baseURL string,
+	verifier string,
+	callbacks <-chan callbackResult,
+) (*CLIExchangeResponse, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -86,11 +142,6 @@ func Login(ctx context.Context, options LoginOptions) (*CLIExchangeResponse, err
 		}
 		return ExchangeCLIAuthCode(ctx, baseURL, result.Code, verifier)
 	}
-}
-
-type callbackResult struct {
-	Code string
-	Err  error
 }
 
 func buildAuthorizeURL(baseURL, state, redirectURI, challenge string) (string, error) {

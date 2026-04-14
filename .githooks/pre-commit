@@ -34,6 +34,7 @@ fi
 
 echo "Running tests..."
 CGO_ENABLED=1 go test -race ./...
+./scripts/check_coverage.sh 35
 
 echo "Running lint..."
 golangci-lint config verify

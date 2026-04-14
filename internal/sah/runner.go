@@ -242,12 +242,25 @@ func buildAgentCommand(
 	prompt string,
 	binaryPaths map[string]string,
 ) (*exec.Cmd, bool, error) {
-	var args []string
-	useStdin := false
+	args, useStdin, err := agentCommandArgs(agent, prompt, workdir)
+	if err != nil {
+		return nil, false, err
+	}
+	args = appendAgentModelArg(args, model)
+	commandPath, err := resolveAgentBinaryPath(agent, binaryPaths)
+	if err != nil {
+		return nil, false, err
+	}
 
+	command := exec.CommandContext(ctx, commandPath, args...)
+	command.Dir = workdir
+	return command, useStdin, nil
+}
+
+func agentCommandArgs(agent AgentSpec, prompt string, workdir string) ([]string, bool, error) {
 	switch agent.Name {
 	case "codex":
-		args = []string{
+		return []string{
 			"exec",
 			"--json",
 			"--skip-git-repo-check",
@@ -256,17 +269,16 @@ func buildAgentCommand(
 			"--ephemeral",
 			"--cd", workdir,
 			"-",
-		}
-		useStdin = true
+		}, true, nil
 	case "gemini":
-		args = []string{
+		return []string{
 			"--prompt", prompt,
 			"--sandbox", "true",
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
-		}
+		}, false, nil
 	case "claude":
-		args = []string{
+		return []string{
 			"-p",
 			"--verbose",
 			"--output-format", "stream-json",
@@ -276,30 +288,24 @@ func buildAgentCommand(
 			"--disable-slash-commands",
 			"--no-session-persistence",
 			prompt,
-		}
+		}, false, nil
 	case "qwen":
-		args = []string{
+		return []string{
 			"--prompt", prompt,
 			"--sandbox",
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
-		}
+		}, false, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
+}
 
-	if strings.TrimSpace(model) != "" {
-		args = append(args, "--model", model)
+func appendAgentModelArg(args []string, model string) []string {
+	if strings.TrimSpace(model) == "" {
+		return args
 	}
-
-	commandPath, err := resolveAgentBinaryPath(agent, binaryPaths)
-	if err != nil {
-		return nil, false, err
-	}
-
-	command := exec.CommandContext(ctx, commandPath, args...)
-	command.Dir = workdir
-	return command, useStdin, nil
+	return append(args, "--model", model)
 }
 
 func resolveAgentBinaryPath(agent AgentSpec, binaryPaths map[string]string) (string, error) {

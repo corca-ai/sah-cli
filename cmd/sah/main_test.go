@@ -58,13 +58,31 @@ func TestPreferredLaunchdExecutableFallsBackToResolvedBinary(t *testing.T) {
 	}
 }
 
-func TestApplyDaemonInstallOptionsAutoRotatesInstalledAgentsByDefault(t *testing.T) {
+func testAgentBinaryPaths(t *testing.T, agents ...string) map[string]string {
+	t.Helper()
+
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
-	binaryPaths := map[string]string{
-		"codex":  writeTestExecutable(t, dir, "codex"),
-		"gemini": writeTestExecutable(t, dir, "gemini"),
+
+	binaryPaths := make(map[string]string, len(agents))
+	for _, agent := range agents {
+		binaryPaths[agent] = writeTestExecutable(t, dir, agent)
 	}
+	return binaryPaths
+}
+
+func resolvedDaemonAgentOrder(t *testing.T, config sah.Config, binaryPaths map[string]string) string {
+	t.Helper()
+
+	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	return joinAgentNames(pool)
+}
+
+func TestApplyDaemonInstallOptionsAutoRotatesInstalledAgentsByDefault(t *testing.T) {
+	binaryPaths := testAgentBinaryPaths(t, "codex", "gemini")
 
 	config := sah.DefaultConfig()
 	if err := applyDaemonInstallOptions(&config, daemonInstallOptions{}, binaryPaths); err != nil {
@@ -76,23 +94,13 @@ func TestApplyDaemonInstallOptionsAutoRotatesInstalledAgentsByDefault(t *testing
 	if len(config.AgentPool) != 0 {
 		t.Fatalf("expected daemon install to persist rotate-installed instead of an explicit pool, got %#v", config.AgentPool)
 	}
-
-	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
-	if err != nil {
-		t.Fatalf("ResolveAgentPool returned error: %v", err)
-	}
-	if got := joinAgentNames(pool); got != "codex, gemini" {
+	if got := resolvedDaemonAgentOrder(t, config, binaryPaths); got != "codex, gemini" {
 		t.Fatalf("expected daemon order codex, gemini, got %q", got)
 	}
 }
 
 func TestApplyDaemonInstallOptionsKeepsConfiguredPinnedAgent(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PATH", dir)
-	binaryPaths := map[string]string{
-		"codex":  writeTestExecutable(t, dir, "codex"),
-		"claude": writeTestExecutable(t, dir, "claude"),
-	}
+	binaryPaths := testAgentBinaryPaths(t, "codex", "claude")
 
 	config := sah.DefaultConfig()
 	config.DefaultAgent = "claude"
@@ -103,23 +111,13 @@ func TestApplyDaemonInstallOptionsKeepsConfiguredPinnedAgent(t *testing.T) {
 	if config.RotateInstalled {
 		t.Fatal("expected explicit configured agent to stay pinned")
 	}
-
-	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
-	if err != nil {
-		t.Fatalf("ResolveAgentPool returned error: %v", err)
-	}
-	if got := joinAgentNames(pool); got != "claude" {
+	if got := resolvedDaemonAgentOrder(t, config, binaryPaths); got != "claude" {
 		t.Fatalf("expected daemon order claude, got %q", got)
 	}
 }
 
 func TestApplyDaemonInstallOptionsKeepsGlobalModelPinnedConfig(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("PATH", dir)
-	binaryPaths := map[string]string{
-		"codex":  writeTestExecutable(t, dir, "codex"),
-		"gemini": writeTestExecutable(t, dir, "gemini"),
-	}
+	binaryPaths := testAgentBinaryPaths(t, "codex", "gemini")
 
 	config := sah.DefaultConfig()
 	config.AgentModel = "gpt-5.4-mini"
@@ -130,12 +128,7 @@ func TestApplyDaemonInstallOptionsKeepsGlobalModelPinnedConfig(t *testing.T) {
 	if config.RotateInstalled {
 		t.Fatal("expected global model override to keep the existing pinned agent config")
 	}
-
-	pool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{BinaryPaths: binaryPaths})
-	if err != nil {
-		t.Fatalf("ResolveAgentPool returned error: %v", err)
-	}
-	if got := joinAgentNames(pool); got != "codex" {
+	if got := resolvedDaemonAgentOrder(t, config, binaryPaths); got != "codex" {
 		t.Fatalf("expected daemon order codex, got %q", got)
 	}
 }

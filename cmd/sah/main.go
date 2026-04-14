@@ -56,60 +56,66 @@ func (err *reportedError) ExitCode() int {
 
 func main() {
 	sah.SetCLIVersion(version)
-
-	if len(os.Args) < 2 {
-		printEntryExperience(os.Stdout, inspectCLIState())
+	commandKey, err := runCLI(os.Args[1:])
+	if err == nil {
+		if commandKey != "" && commandKey != "upgrade" {
+			printCommandSuccessHints(os.Stdout, inspectCLIState(), commandKey)
+		}
 		return
 	}
 
-	if isHelpToken(os.Args[1]) {
-		printHelp(os.Stdout, strings.Join(os.Args[2:], " "), inspectCLIState())
-		return
+	var reported *reportedError
+	if errors.As(err, &reported) {
+		os.Exit(reported.ExitCode())
+	}
+	printCommandFailure(os.Stderr, inspectCLIState(), commandKey, err)
+	os.Exit(1)
+}
+
+func runCLI(args []string) (string, error) {
+	state := inspectCLIState()
+	if len(args) == 0 {
+		printEntryExperience(os.Stdout, state)
+		return "", nil
+	}
+	if isHelpToken(args[0]) {
+		printHelp(os.Stdout, strings.Join(args[1:], " "), state)
+		return "", nil
 	}
 
-	commandKey := canonicalCommandKey(os.Args[1:])
+	commandKey := canonicalCommandKey(args)
 	if requiresSupportedWorkerContract(commandKey) {
 		if err := enforceSupportedWorkerContract(); err != nil {
-			printCommandFailure(os.Stderr, inspectCLIState(), commandKey, err)
-			os.Exit(1)
+			return commandKey, err
 		}
 	}
-	var err error
-	switch os.Args[1] {
+	return commandKey, executeTopLevelCommand(args)
+}
+
+func executeTopLevelCommand(args []string) error {
+	switch args[0] {
 	case "auth":
-		err = authCmd(os.Args[2:])
+		return authCmd(args[1:])
 	case "run":
-		err = runCmd(os.Args[2:])
+		return runCmd(args[1:])
 	case "daemon":
-		err = daemonCmd(os.Args[2:])
+		return daemonCmd(args[1:])
 	case "me":
-		err = meCmd(os.Args[2:])
+		return meCmd(args[1:])
 	case "contributions":
-		err = contributionsCmd(os.Args[2:])
+		return contributionsCmd(args[1:])
 	case "leaderboard":
-		err = leaderboardCmd(os.Args[2:])
+		return leaderboardCmd(args[1:])
 	case "agents":
-		err = agentsCmd(os.Args[2:])
+		return agentsCmd(args[1:])
 	case "upgrade":
-		err = upgradeCmd(os.Args[2:])
+		return upgradeCmd(args[1:])
 	case "version", "--version", "-version":
 		fmt.Println(version)
+		return nil
 	default:
-		printUnknownCommand(os.Stderr, os.Args[1], inspectCLIState())
-		os.Exit(2)
-	}
-
-	if err != nil {
-		var reported *reportedError
-		if errors.As(err, &reported) {
-			os.Exit(reported.ExitCode())
-		}
-		printCommandFailure(os.Stderr, inspectCLIState(), commandKey, err)
-		os.Exit(1)
-	}
-
-	if commandKey != "" && commandKey != "upgrade" {
-		printCommandSuccessHints(os.Stdout, inspectCLIState(), commandKey)
+		printUnknownCommand(os.Stderr, args[0], inspectCLIState())
+		return &reportedError{code: 2, codeSet: true}
 	}
 }
 
@@ -121,104 +127,21 @@ func authCmd(args []string) error {
 
 	switch args[0] {
 	case "login":
-		fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
-		fs.SetOutput(os.Stderr)
-		baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-		noOpen := fs.Bool("no-open", false, "Print the auth URL without opening a browser")
-		if err := fs.Parse(args[1:]); err != nil {
-			return handleFlagParseError(err)
-		}
-
-		ctx, cancel := signalContext()
-		defer cancel()
-
-		paths, config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		if strings.TrimSpace(*baseURL) != "" {
-			config.BaseURL = *baseURL
-		}
-
-		if err := loginAndPersist(ctx, paths, &config, !*noOpen); err != nil {
-			return err
-		}
-
-		client := sah.NewClient(config.BaseURL, config.APIKey)
-		me, err := client.GetMe(ctx)
-		if err == nil {
-			fmt.Printf("Authenticated as %s <%s>.\n", me.Name, me.Email)
-			fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
-			return nil
-		}
-
-		fmt.Println("Authenticated successfully.")
-		return nil
+		return runAuthLogin(args[1:])
 	case "logout":
-		paths, config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		config.APIKey = ""
-		if err := sah.SaveConfig(paths, config); err != nil {
-			return err
-		}
-		fmt.Println("Removed local SCIENCE@home API key.")
-		return nil
+		return runAuthLogout()
 	case "status":
-		_, config, err := loadConfig()
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Base URL: %s\n", config.BaseURL)
-		if strings.TrimSpace(config.APIKey) == "" {
-			fmt.Println("Authentication: not logged in")
-			return nil
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		client := sah.NewClient(config.BaseURL, config.APIKey)
-		me, err := client.GetMe(ctx)
-		switch {
-		case err == nil:
-			fmt.Printf("Authentication: logged in as %s <%s>\n", me.Name, me.Email)
-			fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
-			return nil
-		case sah.IsStatus(err, http.StatusUnauthorized), sah.IsStatus(err, http.StatusForbidden):
-			fmt.Println("Authentication: stored API key exists but was rejected by the server")
-			return nil
-		default:
-			return err
-		}
+		return runAuthStatus()
 	default:
 		printUnknownSubcommand(os.Stderr, "auth", args[0], inspectCLIState())
 		return &reportedError{code: 2, codeSet: true}
 	}
 }
 
-func runCmd(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	agent := fs.String("agent", "", "Agent CLI to use: codex, gemini, claude, qwen")
-	agents := fs.String("agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude,qwen")
-	rotateInstalled := fs.Bool("rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
-	model := fs.String("model", "", "Optional model override passed to the agent CLI")
-	models := fs.String("models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
-	interval := fs.String("interval", "", "Polling interval")
-	timeout := fs.String("timeout", "", "Per-assignment agent timeout")
-	taskType := fs.String("task-type", "", "Optional task type filter")
-	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-	once := fs.Bool("once", false, "Run a single polling cycle and exit")
-	daemonMode := fs.Bool("daemon", false, "Run non-interactively for the background service")
-	if err := fs.Parse(args); err != nil {
-		return handleFlagParseError(err)
-	}
-	if err := validateAgentFlags(*agent, *agents, *rotateInstalled); err != nil {
+func runAuthLogin(args []string) error {
+	baseURL, noOpen, err := parseAuthLoginFlags(args)
+	if err != nil {
 		return err
-	}
-	if !*daemonMode {
-		sah.PrintRunBanner(os.Stdout)
 	}
 
 	ctx, cancel := signalContext()
@@ -228,101 +151,316 @@ func runCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(*baseURL) != "" {
-		config.BaseURL = *baseURL
+	if strings.TrimSpace(baseURL) != "" {
+		config.BaseURL = baseURL
+	}
+	if err := loginAndPersist(ctx, paths, &config, !noOpen); err != nil {
+		return err
+	}
+	printAuthLoginSuccess(ctx, config)
+	return nil
+}
+
+func parseAuthLoginFlags(args []string) (string, bool, error) {
+	fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
+	noOpen := fs.Bool("no-open", false, "Print the auth URL without opening a browser")
+	if err := fs.Parse(args); err != nil {
+		return "", false, handleFlagParseError(err)
+	}
+	return *baseURL, *noOpen, nil
+}
+
+func printAuthLoginSuccess(ctx context.Context, config sah.Config) {
+	client := sah.NewClient(config.BaseURL, config.APIKey)
+	me, err := client.GetMe(ctx)
+	if err != nil {
+		fmt.Println("Authenticated successfully.")
+		return
 	}
 
+	fmt.Printf("Authenticated as %s <%s>.\n", me.Name, me.Email)
+	fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
+}
+
+func runAuthLogout() error {
+	paths, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	config.APIKey = ""
+	if err := sah.SaveConfig(paths, config); err != nil {
+		return err
+	}
+	fmt.Println("Removed local SCIENCE@home API key.")
+	return nil
+}
+
+func runAuthStatus() error {
+	_, config, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Base URL: %s\n", config.BaseURL)
+	if strings.TrimSpace(config.APIKey) == "" {
+		fmt.Println("Authentication: not logged in")
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return printResolvedAuthStatus(ctx, config)
+}
+
+func printResolvedAuthStatus(ctx context.Context, config sah.Config) error {
+	client := sah.NewClient(config.BaseURL, config.APIKey)
+	me, err := client.GetMe(ctx)
+	switch {
+	case err == nil:
+		fmt.Printf("Authentication: logged in as %s <%s>\n", me.Name, me.Email)
+		fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
+		return nil
+	case sah.IsStatus(err, http.StatusUnauthorized), sah.IsStatus(err, http.StatusForbidden):
+		fmt.Println("Authentication: stored API key exists but was rejected by the server")
+		return nil
+	default:
+		return err
+	}
+}
+
+func runCmd(args []string) error {
+	options, err := parseRunCommandOptions(args)
+	if err != nil {
+		return err
+	}
+	if !options.DaemonMode {
+		sah.PrintRunBanner(os.Stdout)
+	}
+
+	ctx, cancel := signalContext()
+	defer cancel()
+
+	session, cleanup, err := prepareRunSession(ctx, options)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	workerOptions, picker, err := buildRunWorkerSession(session, options)
+	if err != nil {
+		return session.report(err)
+	}
+	if !options.DaemonMode {
+		sah.PrintRunPlan(os.Stdout, session.config, workerOptions, picker.Pool())
+	}
+	return session.report(sah.RunWorker(ctx, session.config, workerOptions))
+}
+
+type runCommandOptions struct {
+	Agent           string
+	Agents          string
+	RotateInstalled bool
+	Model           string
+	Models          string
+	Interval        string
+	Timeout         string
+	TaskType        string
+	BaseURL         string
+	Once            bool
+	DaemonMode      bool
+}
+
+type runSession struct {
+	config      sah.Config
+	binaryPaths map[string]string
+	report      func(error) error
+	output      io.Writer
+	errorOutput io.Writer
+}
+
+func parseRunCommandOptions(args []string) (runCommandOptions, error) {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+
+	options := runCommandOptions{}
+	fs.StringVar(&options.Agent, "agent", "", "Agent CLI to use: codex, gemini, claude, qwen")
+	fs.StringVar(&options.Agents, "agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude,qwen")
+	fs.BoolVar(&options.RotateInstalled, "rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
+	fs.StringVar(&options.Model, "model", "", "Optional model override passed to the agent CLI")
+	fs.StringVar(&options.Models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
+	fs.StringVar(&options.Interval, "interval", "", "Polling interval")
+	fs.StringVar(&options.Timeout, "timeout", "", "Per-assignment agent timeout")
+	fs.StringVar(&options.TaskType, "task-type", "", "Optional task type filter")
+	fs.StringVar(&options.BaseURL, "base-url", "", "SCIENCE@home base URL")
+	fs.BoolVar(&options.Once, "once", false, "Run a single polling cycle and exit")
+	fs.BoolVar(&options.DaemonMode, "daemon", false, "Run non-interactively for the background service")
+
+	if err := fs.Parse(args); err != nil {
+		return runCommandOptions{}, handleFlagParseError(err)
+	}
+	if err := validateAgentFlags(options.Agent, options.Agents, options.RotateInstalled); err != nil {
+		return runCommandOptions{}, err
+	}
+	return options, nil
+}
+
+func prepareRunSession(ctx context.Context, options runCommandOptions) (runSession, func(), error) {
+	paths, config, err := loadConfig()
+	if err != nil {
+		return runSession{}, nil, err
+	}
+	if strings.TrimSpace(options.BaseURL) != "" {
+		config.BaseURL = options.BaseURL
+	}
+
+	outputWriter, errorWriter, report, cleanup, err := prepareRunOutputs(paths, options.DaemonMode)
+	if err != nil {
+		return runSession{}, nil, err
+	}
+	session := runSession{
+		config:      config,
+		binaryPaths: nil,
+		report:      report,
+		output:      outputWriter,
+		errorOutput: errorWriter,
+	}
+
+	if err := ensureRunAuthentication(ctx, paths, &session.config, options.DaemonMode, report); err != nil {
+		cleanup()
+		return runSession{}, nil, err
+	}
+	if options.DaemonMode {
+		session.binaryPaths = session.config.AgentBinaryPaths
+	}
+	return session, cleanup, nil
+}
+
+func prepareRunOutputs(
+	paths sah.Paths,
+	daemonMode bool,
+) (io.Writer, io.Writer, func(error) error, func(), error) {
 	outputWriter := io.Writer(os.Stdout)
 	errorWriter := io.Writer(os.Stderr)
 	report := func(runErr error) error {
 		return runErr
 	}
-	if *daemonMode {
-		daemonLogs, err := sah.OpenDaemonLogs(paths)
-		if err != nil {
-			return err
-		}
-		defer func() {
-			_ = daemonLogs.Close()
-		}()
-
-		outputWriter = daemonLogs.Stdout
-		errorWriter = daemonLogs.Stderr
-		report = func(runErr error) error {
-			if runErr == nil {
-				return nil
-			}
-			_, _ = fmt.Fprintf(errorWriter, "[%s] sah: %v\n", time.Now().Format(time.RFC3339), runErr)
-			return &reportedError{err: runErr}
-		}
+	cleanup := func() {}
+	if !daemonMode {
+		return outputWriter, errorWriter, report, cleanup, nil
 	}
 
-	if strings.TrimSpace(config.APIKey) == "" {
-		if *daemonMode {
-			return report(fmt.Errorf("daemon mode requires an existing API key; run `sah auth login` first"))
-		}
-		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
-			return err
-		}
-	}
-
-	var binaryPaths map[string]string
-	if *daemonMode {
-		binaryPaths = config.AgentBinaryPaths
-	}
-
-	if strings.TrimSpace(*agent) != "" {
-		if _, err := sah.ResolveAgentWithBinaryPaths(*agent, binaryPaths); err != nil {
-			return report(err)
-		}
-	}
-	agentPool := sah.ParseAgentList(*agents)
-	if len(agentPool) > 0 {
-		if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
-			Agents:      agentPool,
-			BinaryPaths: binaryPaths,
-		}); err != nil {
-			return report(err)
-		}
-	}
-	agentModels, err := sah.ParseAgentModels(*models)
+	daemonLogs, err := sah.OpenDaemonLogs(paths)
 	if err != nil {
-		return report(err)
+		return nil, nil, nil, nil, err
+	}
+	outputWriter = daemonLogs.Stdout
+	errorWriter = daemonLogs.Stderr
+	report = func(runErr error) error {
+		if runErr == nil {
+			return nil
+		}
+		_, _ = fmt.Fprintf(errorWriter, "[%s] sah: %v\n", time.Now().Format(time.RFC3339), runErr)
+		return &reportedError{err: runErr}
+	}
+	cleanup = func() {
+		_ = daemonLogs.Close()
+	}
+	return outputWriter, errorWriter, report, cleanup, nil
+}
+
+func ensureRunAuthentication(
+	ctx context.Context,
+	paths sah.Paths,
+	config *sah.Config,
+	daemonMode bool,
+	report func(error) error,
+) error {
+	if strings.TrimSpace(config.APIKey) != "" {
+		return nil
+	}
+	if daemonMode {
+		return report(fmt.Errorf("daemon mode requires an existing API key; run `sah auth login` first"))
+	}
+	return loginAndPersist(ctx, paths, config, true)
+}
+
+func buildRunWorkerSession(
+	session runSession,
+	commandOptions runCommandOptions,
+) (sah.WorkerOptions, *sah.AgentPicker, error) {
+	agentPool, err := resolveRunAgentPool(session.config, commandOptions, session.binaryPaths)
+	if err != nil {
+		return sah.WorkerOptions{}, nil, err
+	}
+	workerOptions, err := buildRunWorkerOptions(session, commandOptions, agentPool)
+	if err != nil {
+		return sah.WorkerOptions{}, nil, err
+	}
+	picker, err := sah.NewAgentPicker(session.config, workerOptions)
+	if err != nil {
+		return sah.WorkerOptions{}, nil, err
+	}
+	return workerOptions, picker, nil
+}
+
+func resolveRunAgentPool(
+	config sah.Config,
+	commandOptions runCommandOptions,
+	binaryPaths map[string]string,
+) ([]string, error) {
+	if strings.TrimSpace(commandOptions.Agent) != "" {
+		if _, err := sah.ResolveAgentWithBinaryPaths(commandOptions.Agent, binaryPaths); err != nil {
+			return nil, err
+		}
 	}
 
-	pollInterval, err := sah.ParsePollInterval(pickString(*interval, config.PollInterval))
-	if err != nil {
-		return report(err)
+	agentPool := sah.ParseAgentList(commandOptions.Agents)
+	if len(agentPool) == 0 {
+		return nil, nil
 	}
-	agentTimeout, err := sah.ParseAgentTimeout(pickString(*timeout, config.AgentTimeout))
+	if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
+		Agents:      agentPool,
+		BinaryPaths: binaryPaths,
+	}); err != nil {
+		return nil, err
+	}
+	return agentPool, nil
+}
+
+func buildRunWorkerOptions(
+	session runSession,
+	commandOptions runCommandOptions,
+	agentPool []string,
+) (sah.WorkerOptions, error) {
+	config := session.config
+	agentModels, err := sah.ParseAgentModels(commandOptions.Models)
 	if err != nil {
-		return report(err)
+		return sah.WorkerOptions{}, err
+	}
+	pollInterval, err := sah.ParsePollInterval(pickString(commandOptions.Interval, config.PollInterval))
+	if err != nil {
+		return sah.WorkerOptions{}, err
+	}
+	agentTimeout, err := sah.ParseAgentTimeout(pickString(commandOptions.Timeout, config.AgentTimeout))
+	if err != nil {
+		return sah.WorkerOptions{}, err
 	}
 
-	options := sah.WorkerOptions{
-		Agent:           pickString(*agent, config.DefaultAgent),
+	return sah.WorkerOptions{
+		Agent:           pickString(commandOptions.Agent, config.DefaultAgent),
 		Agents:          agentPool,
-		RotateInstalled: *rotateInstalled,
-		BinaryPaths:     binaryPaths,
-		Model:           pickString(*model, config.AgentModel),
+		RotateInstalled: commandOptions.RotateInstalled,
+		BinaryPaths:     session.binaryPaths,
+		Model:           pickString(commandOptions.Model, config.AgentModel),
 		Models:          sah.MergeAgentModels(config.AgentModels, agentModels),
 		Interval:        pollInterval,
 		Timeout:         agentTimeout,
-		TaskType:        strings.TrimSpace(*taskType),
-		Once:            *once,
-		Output:          outputWriter,
-		ErrorOutput:     errorWriter,
-	}
-
-	picker, err := sah.NewAgentPicker(config, options)
-	if err != nil {
-		return report(err)
-	}
-	if !*daemonMode {
-		sah.PrintRunPlan(os.Stdout, config, options, picker.Pool())
-	}
-
-	return report(sah.RunWorker(ctx, config, options))
+		TaskType:        strings.TrimSpace(commandOptions.TaskType),
+		Once:            commandOptions.Once,
+		Output:          session.output,
+		ErrorOutput:     session.errorOutput,
+	}, nil
 }
 
 func daemonCmd(args []string) error {
@@ -442,59 +580,109 @@ func applyDaemonInstallOptions(
 	options daemonInstallOptions,
 	binaryPaths map[string]string,
 ) error {
+	applyDaemonBaseURL(config, options)
+	if err := applyDaemonAgentSelection(config, options, binaryPaths); err != nil {
+		return err
+	}
+	if err := applyDaemonModelOptions(config, options); err != nil {
+		return err
+	}
+	return applyDaemonTimingOptions(config, options)
+}
+
+func applyDaemonBaseURL(config *sah.Config, options daemonInstallOptions) {
 	if strings.TrimSpace(options.baseURL) != "" {
 		config.BaseURL = options.baseURL
 	}
-	selectionSpecified := false
+}
+
+func applyDaemonAgentSelection(
+	config *sah.Config,
+	options daemonInstallOptions,
+	binaryPaths map[string]string,
+) error {
+	selectionSpecified, err := applyExplicitDaemonSelection(config, options, binaryPaths)
+	if err != nil {
+		return err
+	}
+	if selectionSpecified || !shouldAutoRotateInstalledAgents(*config) {
+		return nil
+	}
+	return setDaemonRotateInstalled(config, binaryPaths)
+}
+
+func applyExplicitDaemonSelection(
+	config *sah.Config,
+	options daemonInstallOptions,
+	binaryPaths map[string]string,
+) (bool, error) {
 	if strings.TrimSpace(options.agent) != "" {
-		if _, err := sah.ResolveAgentWithBinaryPaths(options.agent, binaryPaths); err != nil {
-			return err
+		if err := setDaemonPinnedAgent(config, options.agent, binaryPaths); err != nil {
+			return false, err
 		}
-		config.DefaultAgent = options.agent
-		config.AgentPool = nil
-		config.RotateInstalled = false
-		selectionSpecified = true
+		return true, nil
 	}
 	if pool := sah.ParseAgentList(options.agents); len(pool) > 0 {
-		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
-			Agents:      pool,
-			BinaryPaths: binaryPaths,
-		}); err != nil {
-			return err
+		if err := setDaemonAgentPool(config, pool, binaryPaths); err != nil {
+			return false, err
 		}
-		config.AgentPool = pool
-		config.RotateInstalled = false
-		selectionSpecified = true
+		return true, nil
 	}
 	if options.rotateInstalled {
-		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
-			RotateInstalled: true,
-			BinaryPaths:     binaryPaths,
-		}); err != nil {
-			return err
-		}
-		config.AgentPool = nil
-		config.RotateInstalled = true
-		selectionSpecified = true
+		return true, setDaemonRotateInstalled(config, binaryPaths)
 	}
-	if !selectionSpecified && shouldAutoRotateInstalledAgents(*config) {
-		if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
-			RotateInstalled: true,
-			BinaryPaths:     binaryPaths,
-		}); err != nil {
-			return err
-		}
-		config.AgentPool = nil
-		config.RotateInstalled = true
+	return false, nil
+}
+
+func setDaemonPinnedAgent(config *sah.Config, agent string, binaryPaths map[string]string) error {
+	if _, err := sah.ResolveAgentWithBinaryPaths(agent, binaryPaths); err != nil {
+		return err
 	}
+	config.DefaultAgent = agent
+	config.AgentPool = nil
+	config.RotateInstalled = false
+	return nil
+}
+
+func setDaemonAgentPool(config *sah.Config, pool []string, binaryPaths map[string]string) error {
+	if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
+		Agents:      pool,
+		BinaryPaths: binaryPaths,
+	}); err != nil {
+		return err
+	}
+	config.AgentPool = pool
+	config.RotateInstalled = false
+	return nil
+}
+
+func setDaemonRotateInstalled(config *sah.Config, binaryPaths map[string]string) error {
+	if _, err := sah.ResolveAgentPool(*config, sah.WorkerOptions{
+		RotateInstalled: true,
+		BinaryPaths:     binaryPaths,
+	}); err != nil {
+		return err
+	}
+	config.AgentPool = nil
+	config.RotateInstalled = true
+	return nil
+}
+
+func applyDaemonModelOptions(config *sah.Config, options daemonInstallOptions) error {
 	if strings.TrimSpace(options.model) != "" {
 		config.AgentModel = options.model
 	}
-	if parsedModels, err := sah.ParseAgentModels(options.models); err != nil {
+	parsedModels, err := sah.ParseAgentModels(options.models)
+	if err != nil {
 		return err
-	} else if parsedModels != nil {
+	}
+	if parsedModels != nil {
 		config.AgentModels = parsedModels
 	}
+	return nil
+}
+
+func applyDaemonTimingOptions(config *sah.Config, options daemonInstallOptions) error {
 	if strings.TrimSpace(options.interval) != "" {
 		if _, err := sah.ParsePollInterval(options.interval); err != nil {
 			return err

@@ -222,40 +222,9 @@ func (client *Client) doJSONWithHeaders(
 	out any,
 	options requestOptions,
 ) (http.Header, error) {
-	endpoint, err := client.resolveEndpoint(path)
+	request, err := client.newJSONRequest(ctx, method, path, body, options)
 	if err != nil {
-		return nil, fmt.Errorf("build request url: %w", err)
-	}
-
-	var requestBody io.Reader
-	if body != nil {
-		payload, err := json.Marshal(body)
-		if err != nil {
-			return nil, fmt.Errorf("encode request body: %w", err)
-		}
-		requestBody = bytes.NewReader(payload)
-	}
-
-	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), requestBody)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	request.Header.Set("Accept", "application/json")
-	if client.apiKey != "" {
-		request.Header.Set("X-API-Key", client.apiKey)
-	}
-	if options.WorkerContract {
-		request.Header.Set(TaskProtocolHeader, SupportedTaskProtocol)
-		if capabilities := SupportedClientCapabilitiesHeaderValue(); capabilities != "" {
-			request.Header.Set(ClientCapabilitiesHeader, capabilities)
-		}
-	}
-	if version := CLIVersion(); version != "" {
-		request.Header.Set("X-SAH-CLI-Version", version)
-		request.Header.Set("User-Agent", "sah/"+version)
+		return nil, err
 	}
 
 	response, err := client.httpClient.Do(request)
@@ -270,19 +239,85 @@ func (client *Client) doJSONWithHeaders(
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return nil, decodeStatusError(response)
 	}
+	return headers, decodeJSONResponse(response, out)
+}
+
+func (client *Client) newJSONRequest(
+	ctx context.Context,
+	method string,
+	path string,
+	body any,
+	options requestOptions,
+) (*http.Request, error) {
+	endpoint, err := client.resolveEndpoint(path)
+	if err != nil {
+		return nil, fmt.Errorf("build request url: %w", err)
+	}
+
+	requestBody, err := marshalJSONBody(body)
+	if err != nil {
+		return nil, err
+	}
+	request, err := http.NewRequestWithContext(ctx, method, endpoint.String(), requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	applyJSONRequestHeaders(request, client.apiKey, body != nil, options)
+	return request, nil
+}
+
+func marshalJSONBody(body any) (io.Reader, error) {
+	if body == nil {
+		return nil, nil
+	}
+
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("encode request body: %w", err)
+	}
+	return bytes.NewReader(payload), nil
+}
+
+func applyJSONRequestHeaders(
+	request *http.Request,
+	apiKey string,
+	hasBody bool,
+	options requestOptions,
+) {
+	if hasBody {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	request.Header.Set("Accept", "application/json")
+	if apiKey != "" {
+		request.Header.Set("X-API-Key", apiKey)
+	}
+	if options.WorkerContract {
+		request.Header.Set(TaskProtocolHeader, SupportedTaskProtocol)
+		if capabilities := SupportedClientCapabilitiesHeaderValue(); capabilities != "" {
+			request.Header.Set(ClientCapabilitiesHeader, capabilities)
+		}
+	}
+	if version := CLIVersion(); version != "" {
+		request.Header.Set("X-SAH-CLI-Version", version)
+		request.Header.Set("User-Agent", "sah/"+version)
+	}
+}
+
+func decodeJSONResponse(response *http.Response, out any) error {
 	if out == nil {
-		return headers, nil
+		return nil
 	}
 	if response.StatusCode == http.StatusNoContent {
-		return headers, &StatusError{
+		return &StatusError{
 			StatusCode: response.StatusCode,
 			Message:    http.StatusText(http.StatusNoContent),
 		}
 	}
 	if err := json.NewDecoder(response.Body).Decode(out); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
+		return fmt.Errorf("decode response: %w", err)
 	}
-	return headers, nil
+	return nil
 }
 
 func decodeStatusError(response *http.Response) error {

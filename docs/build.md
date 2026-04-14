@@ -62,11 +62,23 @@ sah auth login
 go test ./...
 ```
 
+Coverage is enforced through the shared helper script used by pre-commit and CI.
+
+```sh
+./scripts/check_coverage.sh 35
+```
+
 ## Lint
 
 ```sh
 golangci-lint run
 ```
+
+The lint profile also enforces:
+
+- cognitive complexity (`gocognit`)
+- function length (`funlen`)
+- duplicate blocks (`dupl`)
 
 To match the Linux CI target from macOS, also run:
 
@@ -87,6 +99,7 @@ The hook runs:
 - `go mod verify`
 - `go mod tidy` and checks that it does not rewrite `go.mod` or `go.sum`
 - `CGO_ENABLED=1 go test -race ./...`
+- `./scripts/check_coverage.sh 35`
 - `golangci-lint config verify`
 - `golangci-lint run ./...`
 - `GOOS=linux GOARCH=amd64 golangci-lint run ./...`

@@ -58,6 +58,39 @@ func TestNormalizeContextCancelSuppressesContextCanceled(t *testing.T) {
 	}
 }
 
+func testWorkerAssignment(id int64, taskType, taskKey string, payload map[string]any) Assignment {
+	return Assignment{
+		AssignmentID: id,
+		TaskType:     taskType,
+		TaskKey:      taskKey,
+		Payload:      payload,
+	}
+}
+
+func newReleasingWorkerClient(
+	t *testing.T,
+	assignment Assignment,
+	released *[]int64,
+	unexpectedSubmitMessage string,
+) fakeWorkerClient {
+	t.Helper()
+
+	return fakeWorkerClient{
+		getTaskFunc: func(context.Context, string) (*Assignment, error) {
+			copy := assignment
+			return &copy, nil
+		},
+		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
+			t.Fatal(unexpectedSubmitMessage)
+			return nil, nil
+		},
+		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
+			*released = append(*released, assignment.AssignmentID)
+			return nil
+		},
+	}
+}
+
 func TestRunWorkerCycleReleasesAssignmentAfterAbort(t *testing.T) {
 	previous := solveAssignment
 	t.Cleanup(func() {
@@ -74,24 +107,12 @@ func TestRunWorkerCycleReleasesAssignmentAfterAbort(t *testing.T) {
 
 	var stdout bytes.Buffer
 	var released []int64
-	client := fakeWorkerClient{
-		getTaskFunc: func(context.Context, string) (*Assignment, error) {
-			return &Assignment{
-				AssignmentID: 42,
-				TaskType:     "extraction",
-				TaskKey:      "paper/42",
-				Payload:      map[string]any{"corpus_id": 42},
-			}, nil
-		},
-		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
-			t.Fatal("SubmitAssignment should not be called after abort")
-			return nil, nil
-		},
-		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
-			released = append(released, assignment.AssignmentID)
-			return nil
-		},
-	}
+	client := newReleasingWorkerClient(
+		t,
+		testWorkerAssignment(42, "extraction", "paper/42", map[string]any{"corpus_id": 42}),
+		&released,
+		"SubmitAssignment should not be called after abort",
+	)
 
 	result, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "codex"}, WorkerOptions{
 		Output:      &stdout,
@@ -126,24 +147,12 @@ func TestRunWorkerCycleReleasesAssignmentAfterLocalFailure(t *testing.T) {
 	}
 
 	var released []int64
-	client := fakeWorkerClient{
-		getTaskFunc: func(context.Context, string) (*Assignment, error) {
-			return &Assignment{
-				AssignmentID: 77,
-				TaskType:     "verification",
-				TaskKey:      "verification",
-				Payload:      map[string]any{"title": "Paper"},
-			}, nil
-		},
-		submitAssignmentFunc: func(context.Context, Assignment, map[string]any) (*SubmitContributionResponse, error) {
-			t.Fatal("SubmitAssignment should not be called after local failure")
-			return nil, nil
-		},
-		releaseOpenAssignmentFn: func(_ context.Context, assignment Assignment) error {
-			released = append(released, assignment.AssignmentID)
-			return nil
-		},
-	}
+	client := newReleasingWorkerClient(
+		t,
+		testWorkerAssignment(77, "verification", "verification", map[string]any{"title": "Paper"}),
+		&released,
+		"SubmitAssignment should not be called after local failure",
+	)
 
 	_, err := runWorkerCycle(context.Background(), client, AgentSpec{Name: "gemini"}, WorkerOptions{
 		Output:      &bytes.Buffer{},

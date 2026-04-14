@@ -184,41 +184,15 @@ func runWorkerCycle(
 	agent AgentSpec,
 	options WorkerOptions,
 ) (WorkerCycleResult, error) {
-	assignment, err := client.GetTask(ctx, options.TaskType)
-	switch {
-	case IsStatus(err, http.StatusNoContent):
-		logLine(options.Output, "no task available")
-		return WorkerCycleResult{}, nil
-	case IsStatus(err, http.StatusTooManyRequests):
-		logLine(options.Output, "%s", openAssignmentLimitMessage(err))
-		return WorkerCycleResult{}, nil
-	case err != nil:
+	assignment, err := fetchWorkerAssignment(ctx, client, options)
+	if err != nil || assignment == nil {
 		return WorkerCycleResult{}, err
 	}
-	if assignment == nil {
-		return WorkerCycleResult{}, fmt.Errorf("task fetch returned no assignment payload")
-	}
-	if assignment.AssignmentID <= 0 || strings.TrimSpace(assignment.TaskType) == "" {
-		return WorkerCycleResult{}, fmt.Errorf(
-			"task fetch returned invalid assignment payload: id=%d task_type=%q",
-			assignment.AssignmentID,
-			assignment.TaskType,
-		)
-	}
-	if err := ValidateAssignmentContract(*assignment); err != nil {
-		releaseAssignmentOnFailure(client, *assignment, options)
-		return WorkerCycleResult{}, fmt.Errorf("assignment %d: %w", assignment.AssignmentID, err)
+	if err := validateCycleAssignment(client, *assignment, options); err != nil {
+		return WorkerCycleResult{}, err
 	}
 
-	logLine(
-		options.Output,
-		"picked assignment %d (%s / %s) with %s",
-		assignment.AssignmentID,
-		assignment.TaskType,
-		assignment.TaskKey,
-		agent.Name,
-	)
-
+	logPickedAssignment(options.Output, *assignment, agent)
 	result, solveErr := solveAssignment(ctx, *assignment, AgentRunOptions{
 		Agent:       agent.Name,
 		Model:       options.Model,
@@ -227,28 +201,101 @@ func runWorkerCycle(
 		Timeout:     options.Timeout,
 	})
 	if solveErr != nil {
-		releaseAssignmentOnFailure(client, *assignment, options)
-		var abortErr *AbortError
-		if errors.As(solveErr, &abortErr) {
-			logLine(options.Output, "agent skipped assignment %d: %s", assignment.AssignmentID, abortErr.Reason)
-			logLine(options.Output, "released assignment %d without submission", assignment.AssignmentID)
-			return WorkerCycleResult{AgentHealthy: true}, nil
-		}
-		logLine(options.Output, "released assignment %d after local failure", assignment.AssignmentID)
-		return WorkerCycleResult{}, &AgentFailure{
-			Agent: agent,
-			Err:   fmt.Errorf("solve assignment %d: %w", assignment.AssignmentID, solveErr),
-		}
+		return handleSolveAssignmentError(client, *assignment, options, agent, solveErr)
 	}
-
-	response, err := client.SubmitAssignment(ctx, *assignment, result.Payload)
+	response, err := submitSolvedAssignment(ctx, client, *assignment, result.Payload, options)
 	if err != nil {
-		releaseAssignmentOnFailure(client, *assignment, options)
-		return WorkerCycleResult{AgentHealthy: true}, fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
+		return WorkerCycleResult{AgentHealthy: true}, err
 	}
 
 	PrintCycleSummary(options.Output, *assignment, result, response)
 	return WorkerCycleResult{AgentHealthy: true}, nil
+}
+
+func fetchWorkerAssignment(
+	ctx context.Context,
+	client workerClient,
+	options WorkerOptions,
+) (*Assignment, error) {
+	assignment, err := client.GetTask(ctx, options.TaskType)
+	switch {
+	case IsStatus(err, http.StatusNoContent):
+		logLine(options.Output, "no task available")
+		return nil, nil
+	case IsStatus(err, http.StatusTooManyRequests):
+		logLine(options.Output, "%s", openAssignmentLimitMessage(err))
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case assignment == nil:
+		return nil, fmt.Errorf("task fetch returned no assignment payload")
+	default:
+		return assignment, nil
+	}
+}
+
+func validateCycleAssignment(client workerClient, assignment Assignment, options WorkerOptions) error {
+	if assignment.AssignmentID <= 0 || strings.TrimSpace(assignment.TaskType) == "" {
+		return fmt.Errorf(
+			"task fetch returned invalid assignment payload: id=%d task_type=%q",
+			assignment.AssignmentID,
+			assignment.TaskType,
+		)
+	}
+	if err := ValidateAssignmentContract(assignment); err != nil {
+		releaseAssignmentOnFailure(client, assignment, options)
+		return fmt.Errorf("assignment %d: %w", assignment.AssignmentID, err)
+	}
+	return nil
+}
+
+func logPickedAssignment(writer io.Writer, assignment Assignment, agent AgentSpec) {
+	logLine(
+		writer,
+		"picked assignment %d (%s / %s) with %s",
+		assignment.AssignmentID,
+		assignment.TaskType,
+		assignment.TaskKey,
+		agent.Name,
+	)
+}
+
+func handleSolveAssignmentError(
+	client workerClient,
+	assignment Assignment,
+	options WorkerOptions,
+	agent AgentSpec,
+	solveErr error,
+) (WorkerCycleResult, error) {
+	releaseAssignmentOnFailure(client, assignment, options)
+
+	var abortErr *AbortError
+	if errors.As(solveErr, &abortErr) {
+		logLine(options.Output, "agent skipped assignment %d: %s", assignment.AssignmentID, abortErr.Reason)
+		logLine(options.Output, "released assignment %d without submission", assignment.AssignmentID)
+		return WorkerCycleResult{AgentHealthy: true}, nil
+	}
+
+	logLine(options.Output, "released assignment %d after local failure", assignment.AssignmentID)
+	return WorkerCycleResult{}, &AgentFailure{
+		Agent: agent,
+		Err:   fmt.Errorf("solve assignment %d: %w", assignment.AssignmentID, solveErr),
+	}
+}
+
+func submitSolvedAssignment(
+	ctx context.Context,
+	client workerClient,
+	assignment Assignment,
+	payload map[string]any,
+	options WorkerOptions,
+) (*SubmitContributionResponse, error) {
+	response, err := client.SubmitAssignment(ctx, assignment, payload)
+	if err != nil {
+		releaseAssignmentOnFailure(client, assignment, options)
+		return nil, fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
+	}
+	return response, nil
 }
 
 func releaseAssignmentOnFailure(client workerClient, assignment Assignment, options WorkerOptions) {
