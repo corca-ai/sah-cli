@@ -62,6 +62,7 @@ brews:
       owner: corca-ai
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
     homepage: https://github.com/corca-ai/sah-cli
     description: SCIENCE@home worker CLI for background agent contributions
     license: MIT
