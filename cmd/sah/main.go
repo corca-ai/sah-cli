@@ -180,7 +180,7 @@ func printAuthLoginSuccess(ctx context.Context, config sah.Config) {
 		return
 	}
 
-	fmt.Printf("Authenticated as %s <%s>.\n", me.Name, me.Email)
+	fmt.Printf("Authenticated as %s <%s>.\n", me.PreferredName(), me.Email)
 	fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
 }
 
@@ -218,7 +218,7 @@ func printResolvedAuthStatus(ctx context.Context, config sah.Config) error {
 	me, err := client.GetMe(ctx)
 	switch {
 	case err == nil:
-		fmt.Printf("Authentication: logged in as %s <%s>\n", me.Name, me.Email)
+		fmt.Printf("Authentication: logged in as %s <%s>\n", me.PreferredName(), me.Email)
 		fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
 		return nil
 	case sah.IsStatus(err, http.StatusUnauthorized), sah.IsStatus(err, http.StatusForbidden):
@@ -879,7 +879,7 @@ func meCmd(args []string) error {
 		return err
 	}
 
-	fmt.Printf("Name: %s\n", me.Name)
+	fmt.Printf("Name: %s\n", me.PreferredName())
 	fmt.Printf("Email: %s\n", me.Email)
 	fmt.Printf("Rank: #%d\n", me.Rank)
 	fmt.Printf("Credits: %d\n", me.Credits)

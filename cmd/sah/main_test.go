@@ -317,6 +317,57 @@ func TestLeaderboardCmdFallsBackToPublicWhenStoredAPIKeyIsRejected(t *testing.T)
 	}
 }
 
+func TestMeCmdFallsBackToDisplayNameWhenLegacyNameIsMissing(t *testing.T) {
+	homeDir := t.TempDir()
+	configDir := filepath.Join(homeDir, ".config")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/s@h/me" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{
+			"id": 1,
+			"email": "ada@example.com",
+			"display_name": "Ada Lovelace",
+			"public_label": "Ada Lovelace (abc234defg)",
+			"public_id": "abc234defg",
+			"credits": 10,
+			"leaderboard_score": 10,
+			"trust": 1.0,
+			"created_at": "2026-04-14T00:00:00Z",
+			"rank": 1,
+			"pending_credits": 0
+		}`))
+	}))
+	defer server.Close()
+
+	paths, err := sah.ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths returned error: %v", err)
+	}
+	if err := sah.SaveConfig(paths, sah.Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+	}); err != nil {
+		t.Fatalf("SaveConfig returned error: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := meCmd(nil); err != nil {
+			t.Fatalf("meCmd returned error: %v", err)
+		}
+	})
+
+	for _, snippet := range []string{"Name: Ada Lovelace", "Email: ada@example.com", "Rank: #1"} {
+		if !strings.Contains(output, snippet) {
+			t.Fatalf("expected output to contain %q, got:\n%s", snippet, output)
+		}
+	}
+}
+
 func captureStdout(t *testing.T, run func()) string {
 	t.Helper()
 

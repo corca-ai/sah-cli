@@ -2,6 +2,7 @@ package sah
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -54,12 +55,28 @@ type MeResponse struct {
 	ID               int64     `json:"id"`
 	Email            string    `json:"email"`
 	Name             string    `json:"name"`
+	PublicID         string    `json:"public_id,omitempty"`
+	DisplayName      string    `json:"display_name,omitempty"`
+	PublicLabel      string    `json:"public_label,omitempty"`
 	Credits          int       `json:"credits"`
 	LeaderboardScore int       `json:"leaderboard_score"`
 	Trust            float64   `json:"trust"`
 	CreatedAt        time.Time `json:"created_at"`
 	Rank             int       `json:"rank"`
 	PendingCredits   int       `json:"pending_credits"`
+}
+
+func (response MeResponse) PreferredName() string {
+	if name := strings.TrimSpace(response.Name); name != "" {
+		return name
+	}
+	if displayName := strings.TrimSpace(response.DisplayName); displayName != "" {
+		return displayName
+	}
+	if publicLabel := strings.TrimSpace(response.PublicLabel); publicLabel != "" {
+		return publicLabel
+	}
+	return strings.TrimSpace(response.PublicID)
 }
 
 type HistoryEntry struct {

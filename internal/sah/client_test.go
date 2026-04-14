@@ -195,8 +195,36 @@ func TestGetMeDoesNotSendWorkerContractHeaders(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-key")
-	if _, err := client.GetMe(context.Background()); err != nil {
+	response, err := client.GetMe(context.Background())
+	if err != nil {
 		t.Fatalf("GetMe returned error: %v", err)
+	}
+	if response.Name != "Ada" {
+		t.Fatalf("expected name Ada, got %q", response.Name)
+	}
+	if response.Email != "ada@example.com" {
+		t.Fatalf("expected email ada@example.com, got %q", response.Email)
+	}
+}
+
+func TestMeResponsePreferredNameFallsBackToPublicIdentity(t *testing.T) {
+	t.Parallel()
+
+	response := MeResponse{
+		DisplayName: "Ada Lovelace",
+		PublicLabel: "Ada Lovelace (abc234defg)",
+		PublicID:    "abc234defg",
+	}
+	if got := response.PreferredName(); got != "Ada Lovelace" {
+		t.Fatalf("expected display-name fallback, got %q", got)
+	}
+
+	response = MeResponse{
+		PublicLabel: "Anonymous (abc234defg)",
+		PublicID:    "abc234defg",
+	}
+	if got := response.PreferredName(); got != "Anonymous (abc234defg)" {
+		t.Fatalf("expected public-label fallback, got %q", got)
 	}
 }
 
