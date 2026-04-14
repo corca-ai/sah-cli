@@ -4,6 +4,7 @@ Read these first:
 
 - [docs/metadoc.md](docs/metadoc.md)
 - [docs/build.md](docs/build.md)
+- [docs/testing.md](docs/testing.md)
 - [docs/architecture.md](docs/architecture.md)
 - [docs/updates.md](docs/updates.md)
 

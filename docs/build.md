@@ -62,6 +62,8 @@ sah auth login
 go test ./...
 ```
 
+Detailed test-layer and quality-gate guidance lives in [testing.md](testing.md).
+
 Coverage is enforced through the shared helper script used by pre-commit and CI.
 
 ```sh
@@ -107,7 +109,7 @@ The hook runs:
 
 ## Release
 
-Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap.
+Pushing a `v*` tag triggers GitHub Actions (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap by writing the formula into the tap repository's `Formula/` directory.
 
 ```sh
 git tag v0.7.0

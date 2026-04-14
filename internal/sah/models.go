@@ -52,8 +52,10 @@ type SubmitContributionResponse struct {
 }
 
 type MeResponse struct {
-	ID               int64     `json:"id"`
-	Email            string    `json:"email"`
+	ID    int64  `json:"id"`
+	Email string `json:"email"`
+	// Legacy field returned by older /s@h/me responses before public identity
+	// fields were added for anonymous-safe display.
 	Name             string    `json:"name"`
 	PublicID         string    `json:"public_id,omitempty"`
 	DisplayName      string    `json:"display_name,omitempty"`
@@ -68,6 +70,8 @@ type MeResponse struct {
 
 func (response MeResponse) PreferredName() string {
 	if name := strings.TrimSpace(response.Name); name != "" {
+		// Keep the legacy field first so older deployed servers still render a
+		// usable name until they expose display_name/public_label consistently.
 		return name
 	}
 	if displayName := strings.TrimSpace(response.DisplayName); displayName != "" {
@@ -110,9 +114,10 @@ func (entry *LeaderboardEntry) UnmarshalJSON(data []byte) error {
 		ID          int64  `json:"id"`
 		PublicID    string `json:"public_id"`
 		PublicLabel string `json:"public_label"`
-		Name        string `json:"name"`
-		Earned      int    `json:"earned"`
-		Rank        int    `json:"rank"`
+		// Legacy field returned by older leaderboard responses.
+		Name   string `json:"name"`
+		Earned int    `json:"earned"`
+		Rank   int    `json:"rank"`
 	}
 
 	var raw rawLeaderboardEntry
@@ -124,6 +129,7 @@ func (entry *LeaderboardEntry) UnmarshalJSON(data []byte) error {
 	entry.PublicID = raw.PublicID
 	entry.PublicLabel = raw.PublicLabel
 	if entry.PublicLabel == "" {
+		// Accept the legacy name field while older servers are still deployed.
 		entry.PublicLabel = raw.Name
 	}
 	entry.Earned = raw.Earned

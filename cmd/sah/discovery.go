@@ -54,6 +54,12 @@ type commandGuide struct {
 	Examples []string
 }
 
+const (
+	cliIntroTitle   = "SCIENCE@home CLI"
+	cliIntroSummary = "`sah` links this machine to SCIENCE@home. It signs you in, claims coding tasks, runs a local agent CLI, and submits the result for credit."
+	maxSuggestions  = 3
+)
+
 var topLevelGuides = []commandGuide{
 	{
 		Topic:   "help",
@@ -342,13 +348,7 @@ func printEntryExperience(writer io.Writer, state cliState) {
 		return
 	}
 
-	_, _ = fmt.Fprintln(writer, "SCIENCE@home CLI")
-	_, _ = fmt.Fprintln(writer)
-	_, _ = fmt.Fprintln(
-		writer,
-		"`sah` links this machine to SCIENCE@home. It signs you in, claims coding tasks, runs a local agent CLI, and submits the result for credit.",
-	)
-	_, _ = fmt.Fprintln(writer)
+	printCLIIntro(writer, cliIntroTitle)
 	_, _ = fmt.Fprintln(writer, "For the full command guide, run `sah help`.")
 	printStateSummary(writer, state)
 	printSuggestionSection(writer, "Try next", suggestionsForContext(state, "", nil))
@@ -367,16 +367,21 @@ func printHelp(writer io.Writer, topic string, state cliState) {
 		return
 	}
 
-	_, _ = fmt.Fprintln(writer, "SCIENCE@home CLI guide")
-	_, _ = fmt.Fprintln(writer)
-	_, _ = fmt.Fprintln(
-		writer,
-		"`sah` links this machine to SCIENCE@home. It signs you in, claims coding tasks, runs a local agent CLI, and submits the result for credit.",
-	)
-	_, _ = fmt.Fprintln(writer)
+	printCLIIntro(writer, "SCIENCE@home CLI guide")
 	printCommandCatalog(writer)
 	printStateSummary(writer, state)
 	printSuggestionSection(writer, "Try next", suggestionsForContext(state, "help", nil))
+}
+
+func printCLIIntro(writer io.Writer, title string) {
+	if writer == nil {
+		return
+	}
+
+	_, _ = fmt.Fprintln(writer, title)
+	_, _ = fmt.Fprintln(writer)
+	_, _ = fmt.Fprintln(writer, cliIntroSummary)
+	_, _ = fmt.Fprintln(writer)
 }
 
 func printGuide(writer io.Writer, guide commandGuide) {
@@ -504,10 +509,7 @@ func releaseSummary(state cliState) string {
 		return ""
 	}
 	if status.UpdateAvailable {
-		target := status.RecommendedVersion
-		if target == "" {
-			target = status.LatestVersion
-		}
+		target := releaseTargetVersion(status)
 		if target == "" {
 			return ""
 		}
@@ -690,7 +692,6 @@ func addPhaseSuggestions(add func(command string, why string), state cliState) {
 }
 
 func limitSuggestions(suggestions []commandSuggestion) []commandSuggestion {
-	const maxSuggestions = 3
 	if len(suggestions) <= maxSuggestions {
 		return suggestions
 	}
@@ -806,15 +807,21 @@ func displayVersion(raw string) string {
 }
 
 func upgradeWhy(status *sah.ClientReleaseStatus) string {
-	if status == nil {
-		return "Install the latest available SCIENCE@home CLI release."
-	}
-	target := status.RecommendedVersion
-	if target == "" {
-		target = status.LatestVersion
-	}
+	target := releaseTargetVersion(status)
 	if target == "" {
 		return "Install the latest available SCIENCE@home CLI release."
 	}
 	return fmt.Sprintf("Install the recommended CLI release %s.", target)
+}
+
+func releaseTargetVersion(status *sah.ClientReleaseStatus) string {
+	if status == nil {
+		return ""
+	}
+
+	target := strings.TrimSpace(status.RecommendedVersion)
+	if target != "" {
+		return target
+	}
+	return strings.TrimSpace(status.LatestVersion)
 }

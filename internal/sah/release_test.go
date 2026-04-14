@@ -45,6 +45,23 @@ func TestResolveClientReleaseStatusDetectsAvailableUpdate(t *testing.T) {
 	}
 }
 
+func TestResolveClientReleaseStatusFallsBackToLatestVersion(t *testing.T) {
+	SetCLIVersion("v0.6.0")
+	t.Cleanup(func() {
+		SetCLIVersion("dev")
+	})
+
+	status := ResolveClientReleaseStatus(&ClientReleaseResponse{
+		LatestVersion: "v0.6.2",
+	})
+	if !status.UpdateAvailable {
+		t.Fatalf("expected update to be available when only latest_version is present, got %#v", status)
+	}
+	if status.RecommendedVersion != "v0.6.2" {
+		t.Fatalf("expected recommended version to normalize to latest, got %#v", status)
+	}
+}
+
 func TestResolveClientReleaseStatusSkipsDevelopmentBuilds(t *testing.T) {
 	SetCLIVersion("dev")
 
@@ -88,6 +105,24 @@ func TestCachedClientReleaseHonorsTTL(t *testing.T) {
 	}
 	if release == nil || release.LatestVersion != "v0.6.2" {
 		t.Fatalf("unexpected cached release: %#v", release)
+	}
+}
+
+func TestCachedClientReleaseReturnsStaleReleaseWhenExpired(t *testing.T) {
+	paths := resolvePaths("darwin", t.TempDir(), "/Users/tester", func(string) string { return "" })
+	if err := SaveClientReleaseCache(paths, ClientReleaseResponse{LatestVersion: "v0.6.2"}, time.Now().Add(-2*time.Hour)); err != nil {
+		t.Fatalf("save cache: %v", err)
+	}
+
+	release, fresh, err := CachedClientRelease(paths, time.Hour)
+	if err != nil {
+		t.Fatalf("cached release: %v", err)
+	}
+	if fresh {
+		t.Fatal("expected cache to be stale")
+	}
+	if release == nil || release.LatestVersion != "v0.6.2" {
+		t.Fatalf("unexpected stale release: %#v", release)
 	}
 }
 

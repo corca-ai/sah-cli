@@ -226,6 +226,13 @@ func TestMeResponsePreferredNameFallsBackToPublicIdentity(t *testing.T) {
 	if got := response.PreferredName(); got != "Anonymous (abc234defg)" {
 		t.Fatalf("expected public-label fallback, got %q", got)
 	}
+
+	response = MeResponse{
+		PublicID: "abc234defg",
+	}
+	if got := response.PreferredName(); got != "abc234defg" {
+		t.Fatalf("expected public-id fallback, got %q", got)
+	}
 }
 
 func TestGetLeaderboardDecodesPublicLabelsAndViewer(t *testing.T) {

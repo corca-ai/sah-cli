@@ -49,5 +49,6 @@ export BROWSER=w3m
 
 - [Agent Guide](AGENTS.md)
 - [Build & Run](docs/build.md)
+- [Testing & Quality](docs/testing.md)
 - [Architecture](docs/architecture.md)
 - [CLI Updates](docs/updates.md)
