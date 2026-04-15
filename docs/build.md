@@ -106,7 +106,7 @@ The hook runs:
 
 `main` now treats [`VERSION`](../VERSION) as the release source of truth.
 
-When `VERSION` changes on `main`, GitHub Actions (`.github/workflows/tag-release.yml`) creates the corresponding annotated `v*` tag automatically. That tag then triggers the existing release workflow (`.github/workflows/release.yml`), which runs GoReleaser. It builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap by writing the formula into the tap repository's `Formula/` directory.
+When `VERSION` changes on `main`, GitHub Actions (`.github/workflows/tag-release.yml`) creates the corresponding annotated `v*` tag automatically and then dispatches the existing release workflow (`.github/workflows/release.yml`) for that tag. The release workflow runs GoReleaser, builds macOS and Linux binaries, creates archives with checksums, publishes a GitHub Release, and updates the Homebrew tap by writing the formula into the tap repository's `Formula/` directory.
 
 Typical release flow:
 
