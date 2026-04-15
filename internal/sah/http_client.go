@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/sandrolain/httpcache"
-	"github.com/sandrolain/httpcache/diskcache"
 )
 
 const maxRedirects = 10
@@ -160,7 +159,7 @@ func buildCachedTransport(paths Paths) http.RoundTripper {
 		return clonedDefaultTransport()
 	}
 
-	transport := httpcache.NewTransport(diskcache.New(cacheDir))
+	transport := httpcache.NewTransport(newQuietDiskCache(cacheDir))
 	transport.Transport = clonedDefaultTransport()
 	transport.CacheKeyHeaders = []string{
 		"X-API-Key",
