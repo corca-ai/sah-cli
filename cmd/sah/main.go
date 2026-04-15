@@ -6,9 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -58,7 +56,7 @@ func main() {
 	sah.SetCLIVersion(version)
 	commandKey, err := runCLI(os.Args[1:])
 	if err == nil {
-		if commandKey != "" && commandKey != "upgrade" {
+		if commandKey != "" {
 			printCommandSuccessHints(os.Stdout, inspectCLIState(), commandKey)
 		}
 		return
@@ -108,8 +106,6 @@ func executeTopLevelCommand(args []string) error {
 		return leaderboardCmd(args[1:])
 	case "agents":
 		return agentsCmd(args[1:])
-	case "upgrade":
-		return upgradeCmd(args[1:])
 	case "version", "--version", "-version":
 		fmt.Println(version)
 		return nil
@@ -157,7 +153,7 @@ func runAuthLogin(args []string) error {
 	if err := loginAndPersist(ctx, paths, &config, !noOpen); err != nil {
 		return err
 	}
-	printAuthLoginSuccess(ctx, config)
+	printAuthLoginSuccess(ctx, paths, config)
 	return nil
 }
 
@@ -165,15 +161,15 @@ func parseAuthLoginFlags(args []string) (string, bool, error) {
 	fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-	noOpen := fs.Bool("no-open", false, "Print the auth URL without opening a browser")
+	noOpen := fs.Bool("no-open", false, "Deprecated compatibility flag; sah now always prints the verification URL")
 	if err := fs.Parse(args); err != nil {
 		return "", false, handleFlagParseError(err)
 	}
 	return *baseURL, *noOpen, nil
 }
 
-func printAuthLoginSuccess(ctx context.Context, config sah.Config) {
-	client := sah.NewClient(config.BaseURL, config.APIKey)
+func printAuthLoginSuccess(ctx context.Context, paths sah.Paths, config sah.Config) {
+	client := sah.NewConfigClient(paths, &config)
 	me, err := client.GetMe(ctx)
 	if err != nil {
 		fmt.Println("Authenticated successfully.")
@@ -190,39 +186,44 @@ func runAuthLogout() error {
 		return err
 	}
 	config.APIKey = ""
+	config.AccessToken = ""
+	config.RefreshToken = ""
+	config.TokenType = ""
+	config.TokenExpiry = ""
+	config.OAuthIssuer = ""
 	if err := sah.SaveConfig(paths, config); err != nil {
 		return err
 	}
-	fmt.Println("Removed local SCIENCE@home API key.")
+	fmt.Println("Removed local SCIENCE@home credentials.")
 	return nil
 }
 
 func runAuthStatus() error {
-	_, config, err := loadConfig()
+	paths, config, err := loadConfig()
 	if err != nil {
 		return err
 	}
 	fmt.Printf("Base URL: %s\n", config.BaseURL)
-	if strings.TrimSpace(config.APIKey) == "" {
+	if !config.HasAuth() {
 		fmt.Println("Authentication: not logged in")
 		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	return printResolvedAuthStatus(ctx, config)
+	return printResolvedAuthStatus(ctx, paths, config)
 }
 
-func printResolvedAuthStatus(ctx context.Context, config sah.Config) error {
-	client := sah.NewClient(config.BaseURL, config.APIKey)
+func printResolvedAuthStatus(ctx context.Context, paths sah.Paths, config sah.Config) error {
+	client := sah.NewConfigClient(paths, &config)
 	me, err := client.GetMe(ctx)
 	switch {
 	case err == nil:
 		fmt.Printf("Authentication: logged in as %s <%s>\n", me.PreferredName(), me.Email)
 		fmt.Printf("Rank: #%d, credits: %d, pending: %d\n", me.Rank, me.Credits, me.PendingCredits)
 		return nil
-	case sah.IsStatus(err, http.StatusUnauthorized), sah.IsStatus(err, http.StatusForbidden):
-		fmt.Println("Authentication: stored API key exists but was rejected by the server")
+	case sah.IsAuthenticationFailure(err):
+		fmt.Println("Authentication: stored credential exists but was rejected by the server")
 		return nil
 	default:
 		return err
@@ -254,7 +255,7 @@ func runCmd(args []string) error {
 	if !options.DaemonMode {
 		sah.PrintRunPlan(os.Stdout, session.config, workerOptions, picker.Pool())
 	}
-	return session.report(sah.RunWorker(ctx, session.config, workerOptions))
+	return session.report(sah.RunWorker(ctx, session.paths, session.config, workerOptions))
 }
 
 type runCommandOptions struct {
@@ -272,6 +273,7 @@ type runCommandOptions struct {
 }
 
 type runSession struct {
+	paths       sah.Paths
 	config      sah.Config
 	binaryPaths map[string]string
 	report      func(error) error
@@ -319,6 +321,7 @@ func prepareRunSession(ctx context.Context, options runCommandOptions) (runSessi
 		return runSession{}, nil, err
 	}
 	session := runSession{
+		paths:       paths,
 		config:      config,
 		binaryPaths: nil,
 		report:      report,
@@ -376,11 +379,11 @@ func ensureRunAuthentication(
 	daemonMode bool,
 	report func(error) error,
 ) error {
-	if strings.TrimSpace(config.APIKey) != "" {
+	if config.HasAuth() {
 		return nil
 	}
 	if daemonMode {
-		return report(fmt.Errorf("daemon mode requires an existing API key; run `sah auth login` first"))
+		return report(fmt.Errorf("daemon mode requires an existing credential; run `sah auth login` first"))
 	}
 	return loginAndPersist(ctx, paths, config, true)
 }
@@ -523,7 +526,7 @@ func daemonInstallCmd(args []string) error {
 		return daemonAgentSelectionError(err)
 	}
 
-	if strings.TrimSpace(config.APIKey) == "" {
+	if !config.HasAuth() {
 		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
 			return err
 		}
@@ -863,14 +866,14 @@ func meCmd(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	_, config, err := loadConfig()
+	paths, config, err := loadConfig()
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(*baseURL) != "" {
 		config.BaseURL = *baseURL
 	}
-	client, err := authedClient(config)
+	client, err := authedClient(paths, config)
 	if err != nil {
 		return err
 	}
@@ -901,14 +904,14 @@ func contributionsCmd(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	_, config, err := loadConfig()
+	paths, config, err := loadConfig()
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(*baseURL) != "" {
 		config.BaseURL = *baseURL
 	}
-	client, err := authedClient(config)
+	client, err := authedClient(paths, config)
 	if err != nil {
 		return err
 	}
@@ -936,18 +939,17 @@ func leaderboardCmd(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	_, config, err := loadConfig()
+	paths, config, err := loadConfig()
 	if err != nil {
 		return err
 	}
 	if strings.TrimSpace(*baseURL) != "" {
 		config.BaseURL = *baseURL
 	}
-	client := sah.NewClient(config.BaseURL, config.APIKey)
+	client := sah.NewCachedConfigClient(paths, &config)
 	response, err := client.GetLeaderboard(ctx)
-	if err != nil && strings.TrimSpace(config.APIKey) != "" &&
-		(sah.IsStatus(err, http.StatusUnauthorized) || sah.IsStatus(err, http.StatusForbidden)) {
-		response, err = sah.NewClient(config.BaseURL, "").GetLeaderboard(ctx)
+	if err != nil && config.HasAuth() && sah.IsAuthenticationFailure(err) {
+		response, err = sah.NewCachedClient(paths, config.BaseURL, "").GetLeaderboard(ctx)
 	}
 	if err != nil {
 		return err
@@ -991,59 +993,6 @@ func agentsCmd(args []string) error {
 	return writer.Flush()
 }
 
-func upgradeCmd(args []string) error {
-	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
-		return handleFlagParseError(err)
-	}
-
-	paths, config, err := loadConfig()
-	if err != nil {
-		return err
-	}
-
-	status, _ := resolveReleaseStatus(paths, config.BaseURL)
-	install, err := detectInstallMethod()
-	if err != nil {
-		return err
-	}
-
-	if install.Kind != installMethodHomebrew {
-		fmt.Println("Automatic upgrade is only supported for Homebrew installs right now.")
-		fmt.Println("Upgrade this CLI using the same method you used to install it.")
-		if status != nil && strings.TrimSpace(status.UpgradeCommand) != "" {
-			fmt.Printf("Recommended command: %s\n", status.UpgradeCommand)
-		}
-		if status != nil && strings.TrimSpace(status.ReleaseNotesURL) != "" {
-			fmt.Printf("Release notes: %s\n", status.ReleaseNotesURL)
-		}
-		return &reportedError{code: 0, codeSet: true}
-	}
-
-	if status != nil && !status.DevelopmentBuild && !status.UpdateAvailable {
-		fmt.Printf("SCIENCE@home CLI is already current at %s.\n", displayVersion(status.CurrentVersion))
-		return &reportedError{code: 0, codeSet: true}
-	}
-
-	fmt.Printf("Running: %s\n", install.DisplayCommand)
-	command := exec.Command(install.Command[0], install.Command[1:]...)
-	command.Stdout = os.Stdout
-	command.Stderr = os.Stderr
-	command.Stdin = os.Stdin
-	if err := command.Run(); err != nil {
-		return fmt.Errorf("upgrade failed: %w", err)
-	}
-
-	fmt.Println("Upgrade command completed.")
-	fmt.Println("Run `sah version` in a fresh shell to confirm the installed version.")
-	if daemonInstalled(paths) {
-		fmt.Println("If the background worker is installed, restart it so it picks up the new binary.")
-		fmt.Println("Recommended commands: `sah daemon stop` and then `sah daemon start`.")
-	}
-	return &reportedError{code: 0, codeSet: true}
-}
-
 func loadConfig() (sah.Paths, sah.Config, error) {
 	paths, err := sah.ResolvePaths()
 	if err != nil {
@@ -1064,6 +1013,7 @@ func loginAndPersist(
 ) error {
 	response, err := sah.Login(ctx, sah.LoginOptions{
 		BaseURL:     config.BaseURL,
+		Paths:       paths,
 		Output:      os.Stdout,
 		OpenBrowser: openBrowser,
 	})
@@ -1071,15 +1021,27 @@ func loginAndPersist(
 		return err
 	}
 
-	config.APIKey = response.APIKey
+	config.APIKey = ""
+	config.AccessToken = response.AccessToken
+	config.RefreshToken = response.RefreshToken
+	config.TokenType = response.TokenType
+	if config.TokenType == "" && config.AccessToken != "" {
+		config.TokenType = "Bearer"
+	}
+	if response.ExpiresIn > 0 {
+		config.TokenExpiry = time.Now().UTC().Add(time.Duration(response.ExpiresIn) * time.Second).Format(time.RFC3339)
+	} else {
+		config.TokenExpiry = ""
+	}
+	config.OAuthClientID = sah.DefaultOAuthClientID
 	return sah.SaveConfig(paths, *config)
 }
 
-func authedClient(config sah.Config) (*sah.Client, error) {
-	if strings.TrimSpace(config.APIKey) == "" {
+func authedClient(paths sah.Paths, config sah.Config) (*sah.Client, error) {
+	if !config.HasAuth() {
 		return nil, fmt.Errorf("not authenticated; run `sah auth login` first")
 	}
-	return sah.NewClient(config.BaseURL, config.APIKey), nil
+	return sah.NewCachedConfigClient(paths, &config), nil
 }
 
 func sciHomeURL(baseURL string) string {

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +11,75 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/corca-ai/sah-cli/internal/sah"
 )
+
+func newInvalidRefreshTokenServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_, _ = writer.Write([]byte(`{
+				"issuer": "https://sah.example",
+				"token_endpoint": "` + server.URL + `/oauth/token"
+			}`))
+		case "/oauth/token":
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{
+				"error": "invalid_grant",
+				"error_description": "Refresh token is invalid"
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	return server
+}
+
+func newAnonymousLeaderboardServer(
+	t *testing.T,
+	tokenEndpoint string,
+	requests *int,
+) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		(*requests)++
+		switch request.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = fmt.Fprintf(writer, `{
+				"issuer": %q,
+				"device_authorization_endpoint": %q,
+				"token_endpoint": %q
+			}`, server.URL, server.URL+"/oauth/device_authorization", tokenEndpoint)
+		case "/s@h/leaderboard":
+			if got := request.Header.Get("Authorization"); got != "" {
+				t.Fatalf("expected anonymous fallback request, got %q", got)
+			}
+			if got := request.Header.Get("X-API-Key"); got != "" {
+				t.Fatalf("expected anonymous fallback request, got api key %q", got)
+			}
+			writer.Header().Set("Content-Type", "application/json")
+			_, _ = writer.Write([]byte(`{
+				"weekly": [
+					{"id": 1, "public_id": "usr_1", "public_label": "Ada", "earned": 42}
+				],
+				"monthly": [],
+				"all_time": []
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	return server
+}
 
 func TestPreferredLaunchdExecutableUsesStableHomebrewSymlink(t *testing.T) {
 	dir := t.TempDir()
@@ -317,6 +385,49 @@ func TestLeaderboardCmdFallsBackToPublicWhenStoredAPIKeyIsRejected(t *testing.T)
 	}
 }
 
+func TestLeaderboardCmdFallsBackToPublicWhenRefreshTokenIsRejected(t *testing.T) {
+	homeDir := t.TempDir()
+	configDir := filepath.Join(homeDir, ".config")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+
+	requests := 0
+	tokenServer := newInvalidRefreshTokenServer(t)
+	defer tokenServer.Close()
+
+	leaderboardServer := newAnonymousLeaderboardServer(t, tokenServer.URL+"/oauth/token", &requests)
+	defer leaderboardServer.Close()
+
+	paths, err := sah.ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths returned error: %v", err)
+	}
+	if err := sah.SaveConfig(paths, sah.Config{
+		BaseURL:       leaderboardServer.URL,
+		AccessToken:   "expired-access-token",
+		RefreshToken:  "refresh-token",
+		TokenType:     "Bearer",
+		TokenExpiry:   time.Now().Add(-time.Minute).Format(time.RFC3339),
+		OAuthClientID: sah.DefaultOAuthClientID,
+		AgentPool:     nil,
+	}); err != nil {
+		t.Fatalf("SaveConfig returned error: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := leaderboardCmd([]string{"--window", "weekly"}); err != nil {
+			t.Fatalf("leaderboardCmd returned error: %v", err)
+		}
+	})
+
+	if requests != 2 {
+		t.Fatalf("expected metadata fetch plus anonymous leaderboard request, got %d requests", requests)
+	}
+	if !strings.Contains(output, "Ada") {
+		t.Fatalf("expected fallback output to contain leaderboard rows, got:\n%s", output)
+	}
+}
+
 func TestMeCmdFallsBackToDisplayNameWhenLegacyNameIsMissing(t *testing.T) {
 	homeDir := t.TempDir()
 	configDir := filepath.Join(homeDir, ".config")
@@ -365,6 +476,42 @@ func TestMeCmdFallsBackToDisplayNameWhenLegacyNameIsMissing(t *testing.T) {
 		if !strings.Contains(output, snippet) {
 			t.Fatalf("expected output to contain %q, got:\n%s", snippet, output)
 		}
+	}
+}
+
+func TestPrintResolvedAuthStatusTreatsInvalidRefreshTokenAsRejectedCredential(t *testing.T) {
+	server := newInvalidRefreshTokenServer(t)
+	defer server.Close()
+
+	homeDir := t.TempDir()
+	configDir := filepath.Join(homeDir, ".config")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", configDir)
+	paths, err := sah.ResolvePaths()
+	if err != nil {
+		t.Fatalf("ResolvePaths returned error: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		err := printResolvedAuthStatus(
+			context.Background(),
+			paths,
+			sah.Config{
+				BaseURL:       server.URL,
+				AccessToken:   "expired-access-token",
+				RefreshToken:  "refresh-token",
+				TokenType:     "Bearer",
+				TokenExpiry:   "2000-01-01T00:00:00Z",
+				OAuthClientID: sah.DefaultOAuthClientID,
+			},
+		)
+		if err != nil {
+			t.Fatalf("printResolvedAuthStatus returned error: %v", err)
+		}
+	})
+
+	if !strings.Contains(output, "stored credential exists but was rejected by the server") {
+		t.Fatalf("expected rejected credential status, got:\n%s", output)
 	}
 }
 

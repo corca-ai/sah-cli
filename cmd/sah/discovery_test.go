@@ -3,13 +3,34 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/corca-ai/sah-cli/internal/sah"
 )
 
+func stubServerNavigation(t *testing.T) {
+	t.Helper()
+
+	original := serverNavigationResolver
+	serverNavigationResolver = func(
+		state cliState,
+		commandKey string,
+		err error,
+	) (*sah.ServiceDocument, []commandSuggestion) {
+		return nil, fallbackSuggestions(state, commandKey, err)
+	}
+	t.Cleanup(func() {
+		serverNavigationResolver = original
+	})
+}
+
 func TestPrintEntryExperienceForSignedOutState(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{
 		BaseURL:         "https://sah.borca.ai",
 		DaemonSupported: true,
@@ -33,6 +54,8 @@ func TestPrintEntryExperienceForSignedOutState(t *testing.T) {
 }
 
 func TestPrintHelpShowsTopicGuideAndSuggestions(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{
 		AuthConfigured:   true,
 		DetectedAgents:   []string{"codex"},
@@ -47,7 +70,7 @@ func TestPrintHelpShowsTopicGuideAndSuggestions(t *testing.T) {
 
 	for _, snippet := range []string{
 		"Help: auth",
-		"Usage: sah auth <login|logout|status>",
+		"sah auth login",
 		"Current status",
 		"`sah daemon install`",
 	} {
@@ -58,6 +81,8 @@ func TestPrintHelpShowsTopicGuideAndSuggestions(t *testing.T) {
 }
 
 func TestSuggestionsForReadyToRunState(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{
 		AuthConfigured:   true,
 		DetectedAgents:   []string{"codex"},
@@ -69,7 +94,7 @@ func TestSuggestionsForReadyToRunState(t *testing.T) {
 	suggestions := suggestionsForContext(state, "", nil)
 	got := suggestionCommands(suggestions)
 
-	for _, want := range []string{"sah daemon install", "sah run --once", "sah me"} {
+	for _, want := range []string{"sah daemon install", "sah run", "sah me"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
 		}
@@ -77,6 +102,8 @@ func TestSuggestionsForReadyToRunState(t *testing.T) {
 }
 
 func TestSuggestionsForDaemonRunningState(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{
 		AuthConfigured:   true,
 		DetectedAgents:   []string{"codex"},
@@ -98,6 +125,8 @@ func TestSuggestionsForDaemonRunningState(t *testing.T) {
 }
 
 func TestSuggestionsForAuthenticationError(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{Stage: stageSignedOut}
 
 	suggestions := suggestionsForContext(
@@ -107,7 +136,64 @@ func TestSuggestionsForAuthenticationError(t *testing.T) {
 	)
 	got := suggestionCommands(suggestions)
 
-	for _, want := range []string{"sah auth login", "sah help auth", "sah agents"} {
+	for _, want := range []string{"sah auth login", "sah auth status", "sah agents"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestSuggestionsForRejectedStoredCredentialError(t *testing.T) {
+	stubServerNavigation(t)
+
+	state := cliState{Stage: stageSignedOut}
+
+	suggestions := suggestionsForContext(
+		state,
+		"me",
+		fmt.Errorf("stored credential rejected; run `sah auth login` again"),
+	)
+	got := suggestionCommands(suggestions)
+
+	for _, want := range []string{"sah auth login", "sah auth status", "sah agents"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestSuggestionsForUnauthorizedStatusError(t *testing.T) {
+	stubServerNavigation(t)
+
+	state := cliState{Stage: stageSignedOut}
+
+	suggestions := suggestionsForContext(
+		state,
+		"me",
+		&sah.StatusError{StatusCode: 401, Message: "Expired service token"},
+	)
+	got := suggestionCommands(suggestions)
+
+	for _, want := range []string{"sah auth login", "sah auth status", "sah agents"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestSuggestionsForInvalidRefreshTokenError(t *testing.T) {
+	stubServerNavigation(t)
+
+	state := cliState{Stage: stageSignedOut}
+
+	suggestions := suggestionsForContext(
+		state,
+		"me",
+		&sah.StatusError{StatusCode: 400, ErrorCode: "invalid_grant", Message: "Refresh token is invalid"},
+	)
+	got := suggestionCommands(suggestions)
+
+	for _, want := range []string{"sah auth login", "sah auth status", "sah agents"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
 		}
@@ -115,7 +201,9 @@ func TestSuggestionsForAuthenticationError(t *testing.T) {
 }
 
 func TestSuggestionsForWorkerContractError(t *testing.T) {
-	state := cliState{Stage: stageReadyToRun}
+	stubServerNavigation(t)
+
+	state := cliState{Stage: stageReadyToRun, DaemonSupported: true}
 
 	suggestions := suggestionsForContext(
 		state,
@@ -127,7 +215,7 @@ func TestSuggestionsForWorkerContractError(t *testing.T) {
 	)
 	got := suggestionCommands(suggestions)
 
-	for _, want := range []string{"sah upgrade", "sah help upgrade", "sah auth status"} {
+	for _, want := range []string{"sah daemon install", "sah run", "sah me"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
 		}
@@ -135,6 +223,8 @@ func TestSuggestionsForWorkerContractError(t *testing.T) {
 }
 
 func TestPrintUnknownCommandShowsCatalog(t *testing.T) {
+	stubServerNavigation(t)
+
 	state := cliState{Stage: stageSignedOut}
 
 	var buffer bytes.Buffer
@@ -143,8 +233,8 @@ func TestPrintUnknownCommandShowsCatalog(t *testing.T) {
 
 	for _, snippet := range []string{
 		`unknown command "autorun"`,
-		"sah auth <login|logout|status>",
-		"sah run [flags]",
+		"sah auth login",
+		"sah run",
 		"`sah auth login`",
 	} {
 		if !strings.Contains(output, snippet) {
@@ -156,6 +246,109 @@ func TestPrintUnknownCommandShowsCatalog(t *testing.T) {
 func TestNormalizeHelpTopicFallsBackToParentCommand(t *testing.T) {
 	if got := normalizeHelpTopic("auth login"); got != "auth" {
 		t.Fatalf("expected auth topic, got %q", got)
+	}
+}
+
+func TestDocumentActionsFallbackIncludesRemoteReadCommands(t *testing.T) {
+	actions := documentActions(nil)
+	commands := make([]string, 0, len(actions))
+	for _, action := range actions {
+		commands = append(commands, action.Command)
+	}
+	got := strings.Join(commands, ", ")
+
+	for _, want := range []string{"me", "contributions", "leaderboard"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected fallback catalog to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestDocumentActionsMergeLocalBuiltinsIntoPartialServiceDocument(t *testing.T) {
+	actions := documentActions(&sah.ServiceDocument{
+		Actions: []sah.CommandAction{
+			{Command: "me", Description: "Server-provided account command."},
+		},
+	})
+
+	commands := make([]string, 0, len(actions))
+	for _, action := range actions {
+		commands = append(commands, action.Command)
+	}
+	got := strings.Join(commands, ", ")
+
+	for _, want := range []string{"me", "auth login", "auth logout", "agents", "version"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected merged command catalog to contain %q, got %q", want, got)
+		}
+	}
+}
+
+func TestResolveServerNavigationFallsBackWhenServerReturnsNoActions(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(homeDir, ".config"))
+
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/s@h":
+			_, _ = writer.Write([]byte(`{
+				"title": "SCIENCE@home CLI",
+				"description": "Server document",
+				"actions": [{"command":"me","description":"My account"}]
+			}`))
+		case "/s@h/navigation":
+			_, _ = writer.Write([]byte(`{
+				"title": "Try next",
+				"description": "No recommendations right now",
+				"actions": []
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	document, suggestions := resolveServerNavigation(
+		cliState{
+			BaseURL:         server.URL,
+			DaemonSupported: true,
+			Stage:           stageSignedOut,
+		},
+		"",
+		nil,
+	)
+
+	if document == nil {
+		t.Fatal("expected service document")
+	}
+	if got := suggestionCommands(suggestions); !strings.Contains(got, "sah auth login") {
+		t.Fatalf("expected fallback suggestions when navigation is empty, got %q", got)
+	}
+}
+
+func TestSuggestionsForReadyToRunStateWithoutDaemonSupport(t *testing.T) {
+	stubServerNavigation(t)
+
+	state := cliState{
+		AuthConfigured:   true,
+		DetectedAgents:   []string{"codex"},
+		HasDetectedAgent: true,
+		DaemonSupported:  false,
+		Stage:            stageReadyToRun,
+	}
+
+	suggestions := suggestionsForContext(state, "", nil)
+	got := suggestionCommands(suggestions)
+
+	for _, want := range []string{"sah run", "sah me", "sah agents"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected suggestions to contain %q, got %q", want, got)
+		}
+	}
+	if strings.Contains(got, "sah daemon install") {
+		t.Fatalf("did not expect daemon suggestion on unsupported platform, got %q", got)
 	}
 }
 

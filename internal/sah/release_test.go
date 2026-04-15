@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
 func TestNormalizeReleaseVersion(t *testing.T) {
@@ -87,42 +86,6 @@ func TestResolveWorkerContractViolationDetectsProtocolMismatchAndMissingCapabili
 	}
 	if len(violation.MissingClientCapabilities) != 1 || violation.MissingClientCapabilities[0] != "future-capability" {
 		t.Fatalf("unexpected missing capabilities: %#v", violation.MissingClientCapabilities)
-	}
-}
-
-func TestCachedClientReleaseHonorsTTL(t *testing.T) {
-	paths := resolvePaths("darwin", t.TempDir(), "/Users/tester", func(string) string { return "" })
-	if err := SaveClientReleaseCache(paths, ClientReleaseResponse{LatestVersion: "v0.6.2"}, time.Now()); err != nil {
-		t.Fatalf("save cache: %v", err)
-	}
-
-	release, fresh, err := CachedClientRelease(paths, time.Hour)
-	if err != nil {
-		t.Fatalf("cached release: %v", err)
-	}
-	if !fresh {
-		t.Fatal("expected cache to be fresh")
-	}
-	if release == nil || release.LatestVersion != "v0.6.2" {
-		t.Fatalf("unexpected cached release: %#v", release)
-	}
-}
-
-func TestCachedClientReleaseReturnsStaleReleaseWhenExpired(t *testing.T) {
-	paths := resolvePaths("darwin", t.TempDir(), "/Users/tester", func(string) string { return "" })
-	if err := SaveClientReleaseCache(paths, ClientReleaseResponse{LatestVersion: "v0.6.2"}, time.Now().Add(-2*time.Hour)); err != nil {
-		t.Fatalf("save cache: %v", err)
-	}
-
-	release, fresh, err := CachedClientRelease(paths, time.Hour)
-	if err != nil {
-		t.Fatalf("cached release: %v", err)
-	}
-	if fresh {
-		t.Fatal("expected cache to be stale")
-	}
-	if release == nil || release.LatestVersion != "v0.6.2" {
-		t.Fatalf("unexpected stale release: %#v", release)
 	}
 }
 

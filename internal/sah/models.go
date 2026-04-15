@@ -22,9 +22,12 @@ type AssignmentLink struct {
 	Href        string `json:"href"`
 	Method      string `json:"method,omitempty"`
 	ContentType string `json:"content_type,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 type AssignmentLinks struct {
+	Self    AssignmentLink `json:"self"`
 	Submit  AssignmentLink `json:"submit"`
 	Release AssignmentLink `json:"release"`
 }
@@ -153,6 +156,84 @@ type LeaderboardResponse struct {
 type CLIExchangeResponse struct {
 	UserID int64  `json:"user_id"`
 	APIKey string `json:"api_key"`
+}
+
+type DeviceAuthorizationResponse struct {
+	Title           string `json:"title"`
+	Description     string `json:"description"`
+	VerificationURL string `json:"verification_url"`
+	UserCode        string `json:"user_code"`
+	DeviceCode      string `json:"device_code"`
+	ExpiresIn       int    `json:"expires_in"`
+	Interval        int    `json:"interval"`
+}
+
+type DeviceTokenResponse struct {
+	Status   string `json:"status"`
+	Interval int    `json:"interval,omitempty"`
+	UserID   int64  `json:"user_id,omitempty"`
+	APIKey   string `json:"api_key,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
+type OAuthAuthorizationServerMetadata struct {
+	Issuer                      string   `json:"issuer"`
+	DeviceAuthorizationEndpoint string   `json:"device_authorization_endpoint"`
+	TokenEndpoint               string   `json:"token_endpoint"`
+	GrantTypesSupported         []string `json:"grant_types_supported,omitempty"`
+	ResponseTypesSupported      []string `json:"response_types_supported,omitempty"`
+	ScopesSupported             []string `json:"scopes_supported,omitempty"`
+	TokenEndpointAuthMethods    []string `json:"token_endpoint_auth_methods_supported,omitempty"`
+}
+
+type OAuthDeviceAuthorizationResponse struct {
+	DeviceCode              string `json:"device_code"`
+	UserCode                string `json:"user_code"`
+	VerificationURI         string `json:"verification_uri"`
+	VerificationURIComplete string `json:"verification_uri_complete,omitempty"`
+	ExpiresIn               int    `json:"expires_in"`
+	Interval                int    `json:"interval,omitempty"`
+}
+
+type OAuthTokenResponse struct {
+	AccessToken  string `json:"access_token,omitempty"`
+	TokenType    string `json:"token_type,omitempty"`
+	ExpiresIn    int    `json:"expires_in,omitempty"`
+	RefreshToken string `json:"refresh_token,omitempty"`
+	Scope        string `json:"scope,omitempty"`
+}
+
+type CommandAction struct {
+	Command     string `json:"command"`
+	Method      string `json:"method,omitempty"`
+	Href        string `json:"href,omitempty"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+type ServiceDocument struct {
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	LatestVersion      string             `json:"latest_version,omitempty"`
+	RecommendedVersion string             `json:"recommended_version,omitempty"`
+	Links              ClientReleaseLinks `json:"_links,omitempty"`
+	Actions            []CommandAction    `json:"actions"`
+}
+
+type NavigationRequest struct {
+	AuthConfigured  bool     `json:"auth_configured"`
+	DetectedAgents  []string `json:"detected_agents,omitempty"`
+	DaemonSupported bool     `json:"daemon_supported"`
+	DaemonInstalled bool     `json:"daemon_installed"`
+	DaemonRunning   bool     `json:"daemon_running"`
+	CurrentCommand  string   `json:"current_command,omitempty"`
+	LastError       string   `json:"last_error,omitempty"`
+}
+
+type NavigationResponse struct {
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Actions     []CommandAction `json:"actions"`
 }
 
 type TokenUsage struct {

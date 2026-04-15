@@ -2,32 +2,39 @@
 
 ## Goal
 
-Keep `sah` upgrades easy to discover without coupling worker compatibility to the binary version string.
+Keep release discovery, worker compatibility, and CLI navigation separate while keeping the binary small.
 
-## User Flow
+## Discovery and Release Metadata
 
-1. Run `sah` or `sah help`.
-2. The CLI inspects local auth, detected agent CLIs, daemon state, and cached release metadata.
-3. If a newer CLI release is available, it suggests `sah upgrade`.
-4. Before worker-only commands start live task traffic, the CLI checks whether it still satisfies the server's worker contract. If not, it stops early and points the user to `sah upgrade`.
+`sah` reads three server-owned documents:
 
-Read-only commands such as `sah me`, `sah contributions`, and `sah leaderboard` are not blocked by release policy.
+- `GET /s@h`
+  Service document for the CLI entrypoint and server-advertised command affordances.
+- `POST /s@h/navigation`
+  Ordered next-command suggestions based on the local machine state the CLI reports.
+- `GET /s@h/client-release`
+  Release metadata and worker-contract requirements.
 
-## Commands
+The CLI no longer ships a built-in `upgrade` command. Release metadata is still surfaced so the CLI can:
 
-- `sah upgrade`
+- tell the user when a newer release is recommended
+- include release-notes links when worker compatibility fails
+- keep the release policy separate from the local command surface
 
-For Homebrew installs, `sah upgrade` runs:
+Read-only commands such as `sah me`, `sah contributions`, and `sah leaderboard` are not blocked by worker-contract policy.
 
-```sh
-brew upgrade corca-ai/tap/sah-cli
-```
+## HTTP Cache
 
-For other install methods, the CLI explains that automatic upgrade is not supported yet and points the user to the recommended manual command or release notes.
+Safe reads share one private disk-backed HTTP cache:
+
+- macOS: `~/Library/Application Support/sah/http-cache/`
+- Linux: `$XDG_CONFIG_HOME/sah/http-cache/` or `~/.config/sah/http-cache/`
+
+The cache honors server `Cache-Control` headers instead of keeping bespoke JSON TTL files. That means `/s@h/client-release` uses the same transport as other safe reads such as `/s@h`, `/s@h/me`, `/s@h/contributions`, and `/s@h/leaderboard`.
 
 ## Release Metadata
 
-`sah` reads release metadata from `GET /s@h/client-release`.
+`sah` still reads release metadata from `GET /s@h/client-release`.
 
 The response includes:
 
@@ -40,21 +47,17 @@ The response includes:
 - `_links.upgrade`
 - `_links.release_notes`
 
-The CLI caches this response locally at:
-
-- macOS: `~/Library/Application Support/sah/client-release.json`
-- Linux: `$XDG_CONFIG_HOME/sah/client-release.json` or `~/.config/sah/client-release.json`
-
-The cache TTL is 24 hours. When the cache is stale, `sah` refreshes it opportunistically with a short timeout and falls back to cached data when refresh fails.
-
 ## Worker Contract
 
-The CLI advertises its worker contract only on routes that claim, submit, or release assignments:
+The CLI advertises its worker contract only on routes that claim, read, submit, or release assignments:
 
-- `GET /s@h/tasks`
+- `POST /s@h/assignments`
+- `GET /s@h/assignments/{id}`
 - `POST /s@h/contributions`
 - `POST /s@h/assignments/{id}/submission`
-- `POST /s@h/assignments/{id}/release`
+- `DELETE /s@h/assignments/{id}`
+
+For backward compatibility, the server enforces the same contract on legacy worker routes such as `GET /s@h/tasks` and `POST /s@h/assignments/{id}/release`.
 
 The advertised headers are:
 

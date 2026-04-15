@@ -19,11 +19,18 @@ const (
 	DefaultLaunchdLabel   = "ai.borca.sah"
 	DefaultSystemdUnit    = DefaultLaunchdLabel + ".service"
 	DefaultLaunchdCommand = "run"
+	DefaultOAuthClientID  = "sah-cli"
 )
 
 type Config struct {
 	BaseURL          string            `json:"base_url"`
 	APIKey           string            `json:"api_key,omitempty"`
+	AccessToken      string            `json:"access_token,omitempty"`
+	RefreshToken     string            `json:"refresh_token,omitempty"`
+	TokenType        string            `json:"token_type,omitempty"`
+	TokenExpiry      string            `json:"token_expiry,omitempty"`
+	OAuthClientID    string            `json:"oauth_client_id,omitempty"`
+	OAuthIssuer      string            `json:"oauth_issuer,omitempty"`
 	DefaultAgent     string            `json:"default_agent,omitempty"`
 	AgentPool        []string          `json:"agent_pool,omitempty"`
 	RotateInstalled  bool              `json:"rotate_installed,omitempty"`
@@ -37,7 +44,7 @@ type Config struct {
 type Paths struct {
 	ConfigDir         string
 	ConfigFile        string
-	ReleaseCacheFile  string
+	HTTPCacheDir      string
 	LogsDir           string
 	LaunchAgentsDir   string
 	LaunchAgentPlist  string
@@ -82,12 +89,12 @@ func resolvePaths(
 	logsDir := resolveLogsDir(goos, configRoot, homeDir, getenv)
 
 	paths := Paths{
-		ConfigDir:        configDir,
-		ConfigFile:       filepath.Join(configDir, "config.json"),
-		ReleaseCacheFile: filepath.Join(configDir, "client-release.json"),
-		LogsDir:          logsDir,
-		DaemonStdoutLog:  filepath.Join(logsDir, "daemon.stdout.log"),
-		DaemonStderrLog:  filepath.Join(logsDir, "daemon.stderr.log"),
+		ConfigDir:       configDir,
+		ConfigFile:      filepath.Join(configDir, "config.json"),
+		HTTPCacheDir:    filepath.Join(configDir, "http-cache"),
+		LogsDir:         logsDir,
+		DaemonStdoutLog: filepath.Join(logsDir, "daemon.stdout.log"),
+		DaemonStderrLog: filepath.Join(logsDir, "daemon.stderr.log"),
 	}
 
 	switch goos {
@@ -196,6 +203,19 @@ func normalizeConfig(config Config) Config {
 	config.AgentPool = normalizeAgentPool(config.AgentPool)
 	config.AgentBinaryPaths = normalizeAgentBinaryPaths(config.AgentBinaryPaths)
 	config.AgentModels = normalizeAgentModels(config.AgentModels)
+	config.APIKey = strings.TrimSpace(config.APIKey)
+	config.AccessToken = strings.TrimSpace(config.AccessToken)
+	config.RefreshToken = strings.TrimSpace(config.RefreshToken)
+	config.TokenType = strings.TrimSpace(config.TokenType)
+	config.TokenExpiry = strings.TrimSpace(config.TokenExpiry)
+	config.OAuthIssuer = strings.TrimSpace(config.OAuthIssuer)
+	config.OAuthClientID = strings.TrimSpace(config.OAuthClientID)
+	if config.OAuthClientID == "" {
+		config.OAuthClientID = DefaultOAuthClientID
+	}
+	if config.TokenType == "" && config.AccessToken != "" {
+		config.TokenType = "Bearer"
+	}
 	if strings.TrimSpace(config.PollInterval) == "" {
 		config.PollInterval = defaults.PollInterval
 	}
@@ -207,6 +227,24 @@ func normalizeConfig(config Config) Config {
 
 func normalizeBaseURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
+
+func (config Config) HasAuth() bool {
+	return strings.TrimSpace(config.AccessToken) != "" ||
+		strings.TrimSpace(config.RefreshToken) != "" ||
+		strings.TrimSpace(config.APIKey) != ""
+}
+
+func (config Config) ParsedTokenExpiry() time.Time {
+	raw := strings.TrimSpace(config.TokenExpiry)
+	if raw == "" {
+		return time.Time{}
+	}
+	parsed, err := time.Parse(time.RFC3339, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return parsed
 }
 
 func normalizeAgentName(raw string) string {

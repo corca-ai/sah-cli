@@ -1,6 +1,9 @@
 package sah
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestResolvePathsForDarwinUsesLibraryDirectories(t *testing.T) {
 	paths := resolvePaths("darwin", "/Users/tester/Library/Application Support", "/Users/tester", func(string) string {
@@ -10,8 +13,8 @@ func TestResolvePathsForDarwinUsesLibraryDirectories(t *testing.T) {
 	if got := paths.ConfigDir; got != "/Users/tester/Library/Application Support/sah" {
 		t.Fatalf("unexpected config dir: %q", got)
 	}
-	if got := paths.ReleaseCacheFile; got != "/Users/tester/Library/Application Support/sah/client-release.json" {
-		t.Fatalf("unexpected release cache file: %q", got)
+	if got := paths.HTTPCacheDir; got != "/Users/tester/Library/Application Support/sah/http-cache" {
+		t.Fatalf("unexpected http cache dir: %q", got)
 	}
 	if got := paths.LogsDir; got != "/Users/tester/Library/Logs/sah" {
 		t.Fatalf("unexpected logs dir: %q", got)
@@ -32,13 +35,40 @@ func TestResolvePathsForLinuxUsesXDGStateAndSystemdUserDir(t *testing.T) {
 	if got := paths.ConfigDir; got != "/home/tester/.config/sah" {
 		t.Fatalf("unexpected config dir: %q", got)
 	}
-	if got := paths.ReleaseCacheFile; got != "/home/tester/.config/sah/client-release.json" {
-		t.Fatalf("unexpected release cache file: %q", got)
+	if got := paths.HTTPCacheDir; got != "/home/tester/.config/sah/http-cache" {
+		t.Fatalf("unexpected http cache dir: %q", got)
 	}
 	if got := paths.LogsDir; got != "/home/tester/.local/state/sah" {
 		t.Fatalf("unexpected logs dir: %q", got)
 	}
 	if got := paths.SystemdUnitFile; got != "/home/tester/.config/systemd/user/ai.borca.sah.service" {
 		t.Fatalf("unexpected systemd unit file: %q", got)
+	}
+}
+
+func TestNormalizeConfigDefaultsOAuthClientID(t *testing.T) {
+	config := normalizeConfig(Config{})
+	if got := config.OAuthClientID; got != DefaultOAuthClientID {
+		t.Fatalf("unexpected oauth client id: %q", got)
+	}
+}
+
+func TestConfigHasAuthAcceptsBearerTokens(t *testing.T) {
+	if !(Config{AccessToken: "access-token"}).HasAuth() {
+		t.Fatal("expected bearer token config to count as authenticated")
+	}
+	if !(Config{APIKey: "api-key"}).HasAuth() {
+		t.Fatal("expected api-key config to count as authenticated")
+	}
+	if (Config{}).HasAuth() {
+		t.Fatal("did not expect empty config to count as authenticated")
+	}
+}
+
+func TestConfigParsedTokenExpiry(t *testing.T) {
+	expiry := time.Date(2026, 4, 15, 4, 5, 6, 0, time.UTC)
+	got := Config{TokenExpiry: expiry.Format(time.RFC3339)}.ParsedTokenExpiry()
+	if !got.Equal(expiry) {
+		t.Fatalf("unexpected token expiry: %v", got)
 	}
 }

@@ -37,13 +37,11 @@ sah daemon install
 
 On Linux, if you want the user service to survive logout and reboot without an active login session, enable lingering for that user with `loginctl enable-linger`.
 
+`sah auth login` now uses a standard OAuth 2.0 Device Authorization Grant. The CLI prints a verification URL and a short code, you complete sign-in in the browser, and the CLI stores an OAuth token set locally once the flow is approved. If you already have a stored legacy contributor API key from an older CLI, the new CLI still accepts it so upgrades do not break existing machines immediately.
+
+Read-only API calls use a private disk-backed HTTP cache that follows server `Cache-Control` headers. Worker claim, submit, release, and auth-polling traffic stays uncached.
+
 Daemon worker logs are written through an internal rotating logger. On macOS they live under `~/Library/Logs/sah/`. On Linux they live under `$XDG_STATE_HOME/sah/` or `~/.local/state/sah/`.
-
-For remote Linux sessions, set `BROWSER` to a text browser before `sah auth login`, for example:
-
-```sh
-export BROWSER=w3m
-```
 
 ## Documentation
 

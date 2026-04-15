@@ -49,6 +49,17 @@ func TestHandleWorkerCycleErrorPropagatesContextCanceledWithoutLogging(t *testin
 	}
 }
 
+func TestHandleWorkerCycleErrorTreatsInvalidRefreshTokenAsReauthentication(t *testing.T) {
+	err := handleWorkerCycleError(
+		NewAgentBackoff(time.Minute),
+		&StatusError{StatusCode: http.StatusBadRequest, ErrorCode: "invalid_grant", Message: "Refresh token is invalid"},
+		WorkerOptions{ErrorOutput: &bytes.Buffer{}},
+	)
+	if err == nil || err.Error() != "stored credential rejected; run `sah auth login` again" {
+		t.Fatalf("expected relogin error, got %v", err)
+	}
+}
+
 func TestNormalizeContextCancelSuppressesContextCanceled(t *testing.T) {
 	if err := normalizeContextCancel(context.Canceled); err != nil {
 		t.Fatalf("expected nil, got %v", err)

@@ -43,10 +43,10 @@ var solveAssignment = SolveAssignment
 
 const releaseAssignmentTimeout = 10 * time.Second
 
-func RunWorker(ctx context.Context, config Config, options WorkerOptions) error {
-	client := NewClient(config.BaseURL, config.APIKey)
+func RunWorker(ctx context.Context, paths Paths, config Config, options WorkerOptions) error {
+	client := NewConfigClient(paths, &config)
 
-	if strings.TrimSpace(config.APIKey) == "" {
+	if !config.HasAuth() {
 		return fmt.Errorf("not authenticated; run `sah auth login` first")
 	}
 
@@ -129,8 +129,8 @@ func handleWorkerCycleError(backoff *AgentBackoff, err error, options WorkerOpti
 	if errors.Is(err, context.Canceled) {
 		return err
 	}
-	if IsStatus(err, http.StatusUnauthorized) || IsStatus(err, http.StatusForbidden) {
-		return fmt.Errorf("api key rejected; run `sah auth login` again")
+	if IsAuthenticationFailure(err) {
+		return fmt.Errorf("stored credential rejected; run `sah auth login` again")
 	}
 	if IsWorkerContractError(err) {
 		return err

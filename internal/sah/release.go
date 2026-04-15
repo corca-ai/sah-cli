@@ -1,17 +1,11 @@
 package sah
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"os"
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 )
-
-const DefaultClientReleaseCacheTTL = 24 * time.Hour
 
 var (
 	clientReleaseVersionPattern = regexp.MustCompile(`^v?(\d+)\.(\d+)\.(\d+)$`)
@@ -35,11 +29,6 @@ type ClientReleaseResponse struct {
 	RequiredTaskProtocolVersion string             `json:"required_task_protocol_version,omitempty"`
 	RequiredClientCapabilities  []string           `json:"required_client_capabilities,omitempty"`
 	Links                       ClientReleaseLinks `json:"_links,omitempty"`
-}
-
-type cachedClientRelease struct {
-	CheckedAt time.Time             `json:"checked_at"`
-	Release   ClientReleaseResponse `json:"release"`
 }
 
 type parsedReleaseVersion struct {
@@ -71,70 +60,6 @@ func SetCLIVersion(raw string) {
 
 func CLIVersion() string {
 	return strings.TrimSpace(cliVersion)
-}
-
-func LoadClientReleaseCache(paths Paths) (*cachedClientRelease, error) {
-	data, err := os.ReadFile(paths.ReleaseCacheFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("read client release cache: %w", err)
-	}
-
-	var cache cachedClientRelease
-	if err := json.Unmarshal(data, &cache); err != nil {
-		return nil, fmt.Errorf("decode client release cache: %w", err)
-	}
-	return &cache, nil
-}
-
-func SaveClientReleaseCache(paths Paths, release ClientReleaseResponse, checkedAt time.Time) error {
-	if err := os.MkdirAll(paths.ConfigDir, 0o755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	cache := cachedClientRelease{
-		CheckedAt: checkedAt.UTC(),
-		Release:   normalizeClientRelease(release),
-	}
-	data, err := json.MarshalIndent(cache, "", "  ")
-	if err != nil {
-		return fmt.Errorf("encode client release cache: %w", err)
-	}
-	data = append(data, '\n')
-
-	if err := os.WriteFile(paths.ReleaseCacheFile, data, 0o600); err != nil {
-		return fmt.Errorf("write client release cache: %w", err)
-	}
-	return nil
-}
-
-func CachedClientRelease(paths Paths, ttl time.Duration) (*ClientReleaseResponse, bool, error) {
-	cache, err := LoadClientReleaseCache(paths)
-	if err != nil || cache == nil {
-		return nil, false, err
-	}
-	if ttl <= 0 {
-		ttl = DefaultClientReleaseCacheTTL
-	}
-	if time.Since(cache.CheckedAt) > ttl {
-		return &cache.Release, false, nil
-	}
-	return &cache.Release, true, nil
-}
-
-func RefreshClientRelease(ctx context.Context, paths Paths, baseURL string) (*ClientReleaseResponse, error) {
-	client := NewClient(baseURL, "")
-	release, err := client.GetClientRelease(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := SaveClientReleaseCache(paths, *release, time.Now()); err != nil {
-		return nil, err
-	}
-	normalized := normalizeClientRelease(*release)
-	return &normalized, nil
 }
 
 func NormalizeReleaseVersion(raw string) string {

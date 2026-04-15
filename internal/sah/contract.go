@@ -64,7 +64,11 @@ func (err *WorkerContractViolation) Error() string {
 
 	command := strings.TrimSpace(err.ResolutionCommand)
 	if command == "" {
-		command = "sah upgrade"
+		command = "install a newer `sah` release"
+		if strings.TrimSpace(err.ReleaseNotesURL) != "" {
+			return strings.Join(append(parts, err.ReleaseNotesURL), "; ")
+		}
+		return strings.Join(append(parts, command), "; ")
 	}
 	resolution := fmt.Sprintf("run `%s`", command)
 	if strings.TrimSpace(err.ReleaseNotesURL) != "" {
@@ -106,7 +110,6 @@ func ResolveWorkerContractViolation(release *ClientReleaseResponse) *WorkerContr
 		RequiredClientCapabilities:    append([]string(nil), normalized.RequiredClientCapabilities...),
 		MissingClientCapabilities:     missing,
 		ReleaseNotesURL:               strings.TrimSpace(normalized.Links.ReleaseNotes.Href),
-		ResolutionCommand:             "sah upgrade",
 	}
 }
 
@@ -119,7 +122,6 @@ func ValidateAssignmentContract(assignment Assignment) error {
 	return &WorkerContractViolation{
 		RequiredTaskProtocolVersion:   requiredProtocol,
 		AdvertisedTaskProtocolVersion: SupportedTaskProtocol,
-		ResolutionCommand:             "sah upgrade",
 	}
 }
 

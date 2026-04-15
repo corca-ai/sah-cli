@@ -49,12 +49,7 @@ loginctl enable-linger "$USER"
 
 If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, `sah daemon install` fails before it starts the service. Run `sah agents` to inspect detection, then re-run the install from a shell where at least one supported CLI is already on `PATH`. The install command captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
 
-For remote Linux sessions, you can use a text browser during auth:
-
-```sh
-export BROWSER=w3m
-sah auth login
-```
+`sah auth login` prints a verification URL and short code. Open the URL in any browser, sign in if needed, enter the code, and the CLI will finish automatically once sign-in is approved.
 
 ## Test
 

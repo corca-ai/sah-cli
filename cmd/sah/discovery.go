@@ -46,205 +46,89 @@ type commandSuggestion struct {
 	Why     string
 }
 
-type commandGuide struct {
-	Topic    string
-	Usage    string
-	Summary  string
-	Details  []string
-	Examples []string
-}
-
 const (
 	cliIntroTitle   = "SCIENCE@home CLI"
 	cliIntroSummary = "`sah` links this machine to SCIENCE@home. It signs you in, claims coding tasks, runs a local agent CLI, and submits the result for credit."
 	maxSuggestions  = 3
 )
 
-var topLevelGuides = []commandGuide{
+var localKernelActions = []sah.CommandAction{
 	{
-		Topic:   "help",
-		Usage:   "sah help [command]",
-		Summary: "Show the command guide or help for one command",
+		Command:     "auth login",
+		Title:       "Sign in",
+		Description: "Pair this machine with SCIENCE@home and store a local credential.",
 	},
 	{
-		Topic:   "auth",
-		Usage:   "sah auth <login|logout|status>",
-		Summary: "Sign in, sign out, or inspect local auth state",
+		Command:     "auth status",
+		Title:       "Authentication status",
+		Description: "Check whether this machine still has a working SCIENCE@home credential.",
 	},
 	{
-		Topic:   "run",
-		Usage:   "sah run [flags]",
-		Summary: "Claim tasks and work in the foreground",
+		Command:     "auth logout",
+		Title:       "Sign out",
+		Description: "Remove the locally stored SCIENCE@home credential from this machine.",
 	},
 	{
-		Topic:   "daemon",
-		Usage:   "sah daemon <install|start|stop|status|uninstall>",
-		Summary: "Manage the background worker service",
+		Command:     "run",
+		Title:       "Foreground worker",
+		Description: "Claim assignments and work in the foreground on this machine.",
 	},
 	{
-		Topic:   "me",
-		Usage:   "sah me",
-		Summary: "Show your SCIENCE@home account summary",
+		Command:     "daemon install",
+		Title:       "Install background worker",
+		Description: "Install and start the background worker service on this machine.",
 	},
 	{
-		Topic:   "contributions",
-		Usage:   "sah contributions",
-		Summary: "Show recent submissions and reviews",
+		Command:     "daemon status",
+		Title:       "Background worker status",
+		Description: "Inspect whether the background worker service is installed and running.",
 	},
 	{
-		Topic:   "leaderboard",
-		Usage:   "sah leaderboard",
-		Summary: "Show public rankings",
+		Command:     "daemon start",
+		Title:       "Start background worker",
+		Description: "Start the installed background worker service again.",
 	},
 	{
-		Topic:   "agents",
-		Usage:   "sah agents",
-		Summary: "Show which supported local agent CLIs this machine can use",
+		Command:     "daemon stop",
+		Title:       "Stop background worker",
+		Description: "Stop the installed background worker service without uninstalling it.",
 	},
 	{
-		Topic:   "version",
-		Usage:   "sah version",
-		Summary: "Print the build version",
+		Command:     "daemon uninstall",
+		Title:       "Uninstall background worker",
+		Description: "Remove the installed background worker service from this machine.",
 	},
 	{
-		Topic:   "upgrade",
-		Usage:   "sah upgrade",
-		Summary: "Upgrade the CLI when a newer release is available",
+		Command:     "agents",
+		Title:       "Local agent CLIs",
+		Description: "Inspect which supported coding agent CLIs are available on this machine.",
+	},
+	{
+		Command:     "version",
+		Title:       "CLI version",
+		Description: "Print the installed sah CLI build version on this machine.",
 	},
 }
 
-var guideByTopic = map[string]commandGuide{
-	"help": {
-		Topic:   "help",
-		Usage:   "sah help [command]",
-		Summary: "Show the command guide or help for one command",
-		Details: []string{
-			"Run `sah help` for the full command catalog.",
-			"Run `sah help auth`, `sah help daemon`, or another command name for focused help.",
-		},
-		Examples: []string{
-			"sah help",
-			"sah help auth",
-			"sah help daemon",
-		},
+var fallbackCatalogActions = []sah.CommandAction{
+	{
+		Command:     "me",
+		Title:       "My account",
+		Description: "View your SCIENCE@home credits, trust, and rank.",
 	},
-	"auth": {
-		Topic:   "auth",
-		Usage:   "sah auth <login|logout|status>",
-		Summary: "Sign in, sign out, or inspect local auth state",
-		Details: []string{
-			"`sah auth login` opens a browser, completes SCIENCE@home sign-in, and stores the API key locally.",
-			"`sah auth status` checks whether this machine has a stored API key and whether the server accepts it.",
-			"`sah auth logout` removes the locally stored API key from this machine.",
-		},
-		Examples: []string{
-			"sah auth login",
-			"sah auth status",
-			"sah auth logout",
-		},
+	{
+		Command:     "contributions",
+		Title:       "Recent contributions",
+		Description: "View your recent submissions and reviews.",
 	},
-	"run": {
-		Topic:   "run",
-		Usage:   "sah run [flags]",
-		Summary: "Claim tasks and work in the foreground",
-		Details: []string{
-			"Use `sah run --once` to claim one assignment, process it, and exit.",
-			"Use `sah run` to stay in a foreground worker loop.",
-			"Use `--agent`, `--agents`, or `--rotate-installed` to choose which local agent CLI should handle assignments.",
-		},
-		Examples: []string{
-			"sah run --once",
-			"sah run --rotate-installed",
-			"sah run --agents codex,claude --models codex=gpt-5.4-mini,claude=sonnet",
-		},
-	},
-	"daemon": {
-		Topic:   "daemon",
-		Usage:   "sah daemon <install|start|stop|status|uninstall>",
-		Summary: "Manage the background worker service",
-		Details: []string{
-			"`sah daemon install` writes the per-user service definition and starts it immediately.",
-			"`sah daemon start` and `sah daemon stop` control the existing background service.",
-			"`sah daemon status` shows whether the background worker is installed and running.",
-			"`sah daemon uninstall` removes the service definition from this machine.",
-		},
-		Examples: []string{
-			"sah daemon install",
-			"sah daemon status",
-			"sah daemon stop",
-		},
-	},
-	"me": {
-		Topic:   "me",
-		Usage:   "sah me",
-		Summary: "Show your SCIENCE@home account summary",
-		Details: []string{
-			"Shows the connected account, credits, pending credits, trust, and rank.",
-		},
-		Examples: []string{
-			"sah me",
-		},
-	},
-	"contributions": {
-		Topic:   "contributions",
-		Usage:   "sah contributions",
-		Summary: "Show recent submissions and reviews",
-		Details: []string{
-			"Lists recent submission and review history for the connected account.",
-		},
-		Examples: []string{
-			"sah contributions",
-			"sah contributions --limit 20",
-		},
-	},
-	"leaderboard": {
-		Topic:   "leaderboard",
-		Usage:   "sah leaderboard",
-		Summary: "Show public rankings",
-		Details: []string{
-			"Shows weekly, monthly, or all-time public rankings.",
-		},
-		Examples: []string{
-			"sah leaderboard",
-			"sah leaderboard --window weekly",
-		},
-	},
-	"agents": {
-		Topic:   "agents",
-		Usage:   "sah agents",
-		Summary: "Show which supported local agent CLIs this machine can use",
-		Details: []string{
-			"Lists supported agent CLIs (`codex`, `gemini`, `claude`, `qwen`) and whether `sah` can find them on this machine.",
-		},
-		Examples: []string{
-			"sah agents",
-		},
-	},
-	"version": {
-		Topic:   "version",
-		Usage:   "sah version",
-		Summary: "Print the build version",
-		Details: []string{
-			"Shows the installed `sah` build version.",
-		},
-		Examples: []string{
-			"sah version",
-		},
-	},
-	"upgrade": {
-		Topic:   "upgrade",
-		Usage:   "sah upgrade",
-		Summary: "Upgrade the CLI when a newer release is available",
-		Details: []string{
-			"Uses the local installation method to upgrade `sah` when possible.",
-			"Homebrew installs are upgraded with `brew upgrade corca-ai/tap/sah-cli`.",
-			"If this machine uses another install method, the command explains the next manual step.",
-		},
-		Examples: []string{
-			"sah upgrade",
-		},
+	{
+		Command:     "leaderboard",
+		Title:       "Leaderboard",
+		Description: "View the public weekly, monthly, and all-time rankings.",
 	},
 }
+
+var serverNavigationResolver = resolveServerNavigation
 
 func inspectCLIState() cliState {
 	paths, config, err := loadConfig()
@@ -264,7 +148,7 @@ func inspectCLIState() cliState {
 func inspectCLIStateWith(paths sah.Paths, config sah.Config, agentStatuses []sah.AgentStatus) cliState {
 	state := cliState{
 		BaseURL:         sciHomeURL(config.BaseURL),
-		AuthConfigured:  strings.TrimSpace(config.APIKey) != "",
+		AuthConfigured:  config.HasAuth(),
 		AgentStatuses:   append([]sah.AgentStatus(nil), agentStatuses...),
 		DaemonSupported: daemonSupported(),
 	}
@@ -290,15 +174,15 @@ func inspectCLIStateWith(paths sah.Paths, config sah.Config, agentStatuses []sah
 		if err != nil {
 			state.ServiceError = err
 			state.DaemonStatus = "unknown"
-			break
-		}
-		state.DaemonRunning = loaded
-		state.DaemonStatus = strings.TrimSpace(detail)
-		if state.DaemonStatus == "" {
-			if loaded {
-				state.DaemonStatus = "running"
-			} else {
-				state.DaemonStatus = "stopped"
+		} else {
+			state.DaemonRunning = loaded
+			state.DaemonStatus = strings.TrimSpace(detail)
+			if state.DaemonStatus == "" {
+				if loaded {
+					state.DaemonStatus = "running"
+				} else {
+					state.DaemonStatus = "stopped"
+				}
 			}
 		}
 	}
@@ -348,10 +232,23 @@ func printEntryExperience(writer io.Writer, state cliState) {
 		return
 	}
 
-	printCLIIntro(writer, cliIntroTitle)
+	document, navigation := serverNavigationResolver(state, "", nil)
+	title := cliIntroTitle
+	summary := cliIntroSummary
+	if document != nil {
+		if strings.TrimSpace(document.Title) != "" {
+			title = document.Title
+		}
+		if strings.TrimSpace(document.Description) != "" {
+			summary = document.Description
+		}
+	}
+
+	printCLIIntro(writer, title, summary)
 	_, _ = fmt.Fprintln(writer, "For the full command guide, run `sah help`.")
+	_, _ = fmt.Fprintln(writer)
 	printStateSummary(writer, state)
-	printSuggestionSection(writer, "Try next", suggestionsForContext(state, "", nil))
+	printSuggestionSection(writer, "Try next", navigation)
 }
 
 func printHelp(writer io.Writer, topic string, state cliState) {
@@ -359,56 +256,48 @@ func printHelp(writer io.Writer, topic string, state cliState) {
 		return
 	}
 
-	normalized := normalizeHelpTopic(topic)
-	if guide, ok := guideForTopic(normalized); ok {
-		printGuide(writer, guide)
-		printStateSummary(writer, state)
-		printSuggestionSection(writer, "Try next", suggestionsForContext(state, normalized, nil))
-		return
+	document, navigation := serverNavigationResolver(state, normalizeHelpTopic(topic), nil)
+	title := "SCIENCE@home CLI guide"
+	summary := cliIntroSummary
+	normalizedTopic := normalizeHelpTopic(topic)
+	if document != nil {
+		if strings.TrimSpace(document.Title) != "" {
+			title = document.Title
+		}
+		if strings.TrimSpace(document.Description) != "" {
+			summary = document.Description
+		}
 	}
 
-	printCLIIntro(writer, "SCIENCE@home CLI guide")
-	printCommandCatalog(writer)
+	printCLIIntro(writer, title, summary)
+	if normalizedTopic != "" {
+		_, _ = fmt.Fprintf(writer, "Help: %s\n\n", normalizedTopic)
+	}
+	printCommandCatalog(writer, filterActions(topic, documentActions(document)))
 	printStateSummary(writer, state)
-	printSuggestionSection(writer, "Try next", suggestionsForContext(state, "help", nil))
+	printSuggestionSection(writer, "Try next", navigation)
 }
 
-func printCLIIntro(writer io.Writer, title string) {
-	if writer == nil {
-		return
-	}
-
+func printCLIIntro(writer io.Writer, title string, summary string) {
 	_, _ = fmt.Fprintln(writer, title)
 	_, _ = fmt.Fprintln(writer)
-	_, _ = fmt.Fprintln(writer, cliIntroSummary)
+	_, _ = fmt.Fprintln(writer, summary)
 	_, _ = fmt.Fprintln(writer)
 }
 
-func printGuide(writer io.Writer, guide commandGuide) {
-	_, _ = fmt.Fprintf(writer, "Help: %s\n\n", guide.Topic)
-	_, _ = fmt.Fprintf(writer, "Usage: %s\n", guide.Usage)
-	_, _ = fmt.Fprintf(writer, "%s\n", guide.Summary)
-	if len(guide.Details) > 0 {
-		_, _ = fmt.Fprintln(writer)
-		_, _ = fmt.Fprintln(writer, "Details")
-		for _, line := range guide.Details {
-			_, _ = fmt.Fprintf(writer, "- %s\n", line)
-		}
+func printCommandCatalog(writer io.Writer, actions []sah.CommandAction) {
+	if len(actions) == 0 {
+		actions = localKernelActions
 	}
-	if len(guide.Examples) > 0 {
-		_, _ = fmt.Fprintln(writer)
-		_, _ = fmt.Fprintln(writer, "Examples")
-		for _, example := range guide.Examples {
-			_, _ = fmt.Fprintf(writer, "- `%s`\n", example)
-		}
-	}
-}
 
-func printCommandCatalog(writer io.Writer) {
 	_, _ = fmt.Fprintln(writer, "Commands")
 	tw := tabwriter.NewWriter(writer, 0, 0, 2, ' ', 0)
-	for _, guide := range topLevelGuides {
-		_, _ = fmt.Fprintf(tw, "  %s\t%s\n", guide.Usage, guide.Summary)
+	for _, action := range actions {
+		command := strings.TrimSpace(action.Command)
+		if command == "" {
+			continue
+		}
+		_, _ = fmt.Fprintf(tw, "  sah %s\t%s\n", command, strings.TrimSpace(action.Description))
 	}
 	_ = tw.Flush()
 }
@@ -418,11 +307,10 @@ func printUnknownCommand(writer io.Writer, raw string, state cliState) {
 		return
 	}
 
+	document, navigation := serverNavigationResolver(state, "", fmt.Errorf("unknown command"))
 	_, _ = fmt.Fprintf(writer, "sah: unknown command %q\n\n", raw)
-	_, _ = fmt.Fprintln(writer, "Run `sah help` for the full command guide.")
-	_, _ = fmt.Fprintln(writer)
-	printCommandCatalog(writer)
-	printSuggestionSection(writer, "Try next", suggestionsForContext(state, "", fmt.Errorf("unknown command")))
+	printCommandCatalog(writer, documentActions(document))
+	printSuggestionSection(writer, "Try next", navigation)
 }
 
 func printUnknownSubcommand(writer io.Writer, parent string, raw string, state cliState) {
@@ -440,14 +328,18 @@ func printCommandFailure(writer io.Writer, state cliState, commandKey string, er
 	}
 
 	_, _ = fmt.Fprintf(writer, "sah: %v\n", err)
-	printSuggestionSection(writer, "Try next", suggestionsForContext(state, commandKey, err))
+	_, _ = fmt.Fprintln(writer)
+	_, _ = fmt.Fprintln(writer, "Try next")
+	for _, suggestion := range resolveNavigationSuggestions(state, commandKey, err) {
+		_, _ = fmt.Fprintf(writer, "- `%s` %s\n", suggestion.Command, suggestion.Why)
+	}
 }
 
 func printCommandSuccessHints(writer io.Writer, state cliState, commandKey string) {
 	if writer == nil {
 		return
 	}
-	printSuggestionSection(writer, "Next commands", suggestionsForContext(state, commandKey, nil))
+	printSuggestionSection(writer, "Next commands", resolveNavigationSuggestions(state, commandKey, nil))
 }
 
 func printStateSummary(writer io.Writer, state cliState) {
@@ -505,17 +397,17 @@ func daemonSummary(state cliState) string {
 
 func releaseSummary(state cliState) string {
 	status := state.ReleaseStatus
-	if status == nil {
+	if status == nil || !status.UpdateAvailable {
 		return ""
 	}
-	if status.UpdateAvailable {
-		target := releaseTargetVersion(status)
-		if target == "" {
-			return ""
-		}
-		return fmt.Sprintf("available: %s (current %s)", target, displayVersion(status.CurrentVersion))
+	target := releaseTargetVersion(status)
+	if target == "" {
+		return ""
 	}
-	return ""
+	if url := strings.TrimSpace(status.ReleaseNotesURL); url != "" {
+		return fmt.Sprintf("available: %s (current %s, %s)", target, displayVersion(status.CurrentVersion), url)
+	}
+	return fmt.Sprintf("available: %s (current %s)", target, displayVersion(status.CurrentVersion))
 }
 
 func printSuggestionSection(writer io.Writer, title string, suggestions []commandSuggestion) {
@@ -532,197 +424,197 @@ func printSuggestionSection(writer io.Writer, title string, suggestions []comman
 	_ = tw.Flush()
 }
 
+func resolveServerNavigation(
+	state cliState,
+	commandKey string,
+	err error,
+) (*sah.ServiceDocument, []commandSuggestion) {
+	paths, _, loadErr := loadConfig()
+	baseURL := sciHomeURL(state.BaseURL)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	var client *sah.Client
+	if loadErr == nil {
+		client = sah.NewCachedClient(paths, baseURL, "")
+	} else {
+		client = sah.NewClient(baseURL, "")
+	}
+	document, docErr := client.GetServiceDocument(ctx)
+	if docErr != nil {
+		document = nil
+	}
+
+	nav, navErr := client.GetNavigation(ctx, navigationRequestFromState(state, commandKey, err))
+	if navErr != nil || nav == nil {
+		return document, fallbackSuggestions(state, commandKey, err)
+	}
+	suggestions := toSuggestions(nav.Actions)
+	if len(suggestions) == 0 {
+		return document, fallbackSuggestions(state, commandKey, err)
+	}
+	return document, suggestions
+}
+
+func resolveNavigationSuggestions(state cliState, commandKey string, err error) []commandSuggestion {
+	_, suggestions := serverNavigationResolver(state, commandKey, err)
+	return suggestions
+}
+
 func suggestionsForContext(state cliState, commandKey string, err error) []commandSuggestion {
-	list := make([]commandSuggestion, 0, 4)
-	seen := map[string]struct{}{}
-	add := func(command string, why string) {
-		command = strings.TrimSpace(command)
-		why = strings.TrimSpace(why)
+	return resolveNavigationSuggestions(state, commandKey, err)
+}
+
+func documentActions(document *sah.ServiceDocument) []sah.CommandAction {
+	fallback := mergeCommandActions(localKernelActions, fallbackCatalogActions)
+	if document == nil || len(document.Actions) == 0 {
+		return fallback
+	}
+	return mergeCommandActions(document.Actions, fallback)
+}
+
+func filterActions(topic string, actions []sah.CommandAction) []sah.CommandAction {
+	normalized := normalizeHelpTopic(topic)
+	if normalized == "" {
+		return actions
+	}
+
+	filtered := make([]sah.CommandAction, 0, len(actions))
+	for _, action := range actions {
+		command := strings.ToLower(strings.TrimSpace(action.Command))
+		if command == normalized || strings.HasPrefix(command, normalized+" ") {
+			filtered = append(filtered, action)
+		}
+	}
+	if len(filtered) == 0 {
+		return actions
+	}
+	return filtered
+}
+
+func mergeCommandActions(primary []sah.CommandAction, fallback []sah.CommandAction) []sah.CommandAction {
+	merged := make([]sah.CommandAction, 0, len(primary)+len(fallback))
+	seen := make(map[string]struct{}, len(primary)+len(fallback))
+	appendUnique := func(actions []sah.CommandAction) {
+		for _, action := range actions {
+			command := strings.ToLower(strings.TrimSpace(action.Command))
+			if command == "" {
+				continue
+			}
+			if _, ok := seen[command]; ok {
+				continue
+			}
+			seen[command] = struct{}{}
+			merged = append(merged, action)
+		}
+	}
+
+	appendUnique(primary)
+	appendUnique(fallback)
+	return merged
+}
+
+func toSuggestions(actions []sah.CommandAction) []commandSuggestion {
+	suggestions := make([]commandSuggestion, 0, len(actions))
+	for _, action := range actions {
+		command := strings.TrimSpace(action.Command)
+		why := strings.TrimSpace(action.Description)
 		if command == "" || why == "" {
-			return
+			continue
 		}
-		if _, ok := seen[command]; ok {
-			return
-		}
-		seen[command] = struct{}{}
-		list = append(list, commandSuggestion{Command: command, Why: why})
-	}
-
-	if state.ReleaseStatus != nil {
-		if state.ReleaseStatus.UpdateAvailable {
-			add("sah upgrade", upgradeWhy(state.ReleaseStatus))
+		suggestions = append(suggestions, commandSuggestion{
+			Command: "sah " + command,
+			Why:     why,
+		})
+		if len(suggestions) == maxSuggestions {
+			break
 		}
 	}
-
-	if handled := addErrorSuggestions(add, state, err); handled {
-		return limitSuggestions(list)
-	}
-
-	addCommandSuggestions(add, state, commandKey)
-	return limitSuggestions(list)
+	return suggestions
 }
 
-func addErrorSuggestions(add func(command string, why string), state cliState, err error) bool {
+func navigationRequestFromState(state cliState, commandKey string, err error) sah.NavigationRequest {
+	return sah.NavigationRequest{
+		AuthConfigured:  state.AuthConfigured,
+		DetectedAgents:  append([]string(nil), state.DetectedAgents...),
+		DaemonSupported: state.DaemonSupported,
+		DaemonInstalled: state.DaemonInstalled,
+		DaemonRunning:   state.DaemonRunning,
+		CurrentCommand:  strings.TrimSpace(commandKey),
+		LastError:       navigationErrorCode(err),
+	}
+}
+
+func navigationErrorCode(err error) string {
 	switch {
+	case err == nil:
+		return ""
 	case isNotAuthenticatedError(err):
-		add("sah auth login", "Sign in from your browser and link this machine.")
-		add("sah help auth", "See the authentication commands and what each one does.")
-		add("sah agents", "Inspect which supported local agent CLIs `sah` can use here.")
-		return true
-	case sah.IsWorkerContractError(err):
-		add("sah upgrade", "Install a CLI release that supports the current SCIENCE@home worker contract.")
-		add("sah help upgrade", "See how CLI upgrades are handled on this machine.")
-		add("sah auth status", "Confirm this machine is still connected after the upgrade.")
-		return true
+		return "not_authenticated"
 	case sah.IsNoSupportedAgentCLI(err):
-		add("sah agents", "See which supported local agent CLIs are installed and which ones are missing.")
-		if state.AuthConfigured {
-			add("sah auth status", "Confirm this machine is already connected before installing a worker.")
-		} else {
-			add("sah auth login", "Sign in first so this machine is ready once an agent CLI is available.")
-		}
-		add("sah help run", "See how foreground and background execution work.")
-		return true
+		return "no_supported_agent"
+	case sah.IsWorkerContractError(err):
+		return "worker_contract"
 	default:
-		return false
+		return ""
 	}
 }
 
-func addCommandSuggestions(add func(command string, why string), state cliState, commandKey string) {
-	switch commandKey {
-	case "auth login":
-		addPostLoginSuggestions(add, state)
-	case "auth logout":
-		add("sah auth login", "Reconnect this machine to SCIENCE@home.")
-		add("sah help auth", "Review the authentication commands.")
-	case "auth", "auth status", "daemon", "daemon status", "help", "version", "":
-		addPhaseSuggestions(add, state)
-	case "run":
-		addRunSuggestions(add, state)
-	case "daemon install", "daemon start":
-		add("sah daemon status", "Verify that the background service is installed and running.")
-		add("sah contributions", "See new submissions and reviews after the worker starts running.")
-		add("sah me", "Check credits, pending credits, trust, and rank.")
-	case "daemon stop":
-		add("sah daemon start", "Start the background worker again.")
-		add("sah daemon status", "Check whether the service is still installed.")
-	case "me":
-		add("sah contributions", "See the recent work behind the numbers in your account summary.")
-		add("sah leaderboard", "Compare your progress against the public rankings.")
-		if state.DaemonSupported {
-			add("sah daemon status", "Check whether the background worker is running.")
-		}
-	case "contributions":
-		add("sah me", "See your overall credits, trust, and rank.")
-		add("sah leaderboard", "Compare your progress against the public rankings.")
-		if state.DaemonSupported {
-			add("sah daemon status", "Check whether the background worker is still running.")
-		}
-	case "leaderboard":
-		add("sah me", "Check your own credits, trust, and rank.")
-		add("sah contributions", "See the recent work behind your score.")
-	case "agents":
-		addAgentSuggestions(add, state)
-	case "upgrade":
-		if state.DaemonInstalled {
-			add("sah daemon status", "Verify the background worker after upgrading the CLI.")
-		}
-		add("sah version", "Confirm the new CLI version in a fresh invocation.")
+func fallbackSuggestions(state cliState, commandKey string, err error) []commandSuggestion {
+	request := navigationRequestFromState(state, commandKey, err)
+	actions := make([]sah.CommandAction, 0, 3)
+	switch request.LastError {
+	case "not_authenticated":
+		actions = append(actions,
+			localKernelActions[0],
+			localKernelActions[1],
+			localKernelActions[9],
+		)
+	case "no_supported_agent":
+		actions = append(actions,
+			localKernelActions[9],
+			localKernelActions[1],
+			localKernelActions[3],
+		)
 	default:
-		addPhaseSuggestions(add, state)
+		switch state.Stage {
+		case stageSignedOut:
+			actions = append(actions, localKernelActions[0], localKernelActions[9], localKernelActions[10])
+		case stageNeedsAgent:
+			actions = append(actions, localKernelActions[9], sah.CommandAction{Command: "me", Description: "Confirm the connected account before enabling work."}, localKernelActions[3])
+		case stageReadyToRun:
+			if state.DaemonSupported {
+				actions = append(actions, localKernelActions[4], localKernelActions[3], sah.CommandAction{Command: "me", Description: "Check your credits, trust, and rank."})
+			} else {
+				actions = append(actions, localKernelActions[3], sah.CommandAction{Command: "me", Description: "Check your credits, trust, and rank."}, localKernelActions[9])
+			}
+		case stageDaemonStopped:
+			if state.DaemonSupported {
+				actions = append(actions, localKernelActions[6], localKernelActions[5], sah.CommandAction{Command: "contributions", Description: "See recent submissions and reviews."})
+			} else {
+				actions = append(actions, localKernelActions[3], sah.CommandAction{Command: "contributions", Description: "See recent submissions and reviews."}, sah.CommandAction{Command: "me", Description: "Check your credits, trust, and rank."})
+			}
+		default:
+			if state.DaemonSupported {
+				actions = append(actions, sah.CommandAction{Command: "contributions", Description: "See recent submissions and reviews."}, sah.CommandAction{Command: "me", Description: "Check your credits, trust, and rank."}, localKernelActions[5])
+			} else {
+				actions = append(actions, localKernelActions[3], sah.CommandAction{Command: "contributions", Description: "See recent submissions and reviews."}, sah.CommandAction{Command: "me", Description: "Check your credits, trust, and rank."})
+			}
+		}
 	}
-}
-
-func addPostLoginSuggestions(add func(command string, why string), state cliState) {
-	if state.HasDetectedAgent {
-		add("sah daemon install", "Install and start the background worker on this machine.")
-		add("sah run --once", "Claim one task now in the foreground and exit.")
-	} else {
-		add("sah agents", "Inspect which supported local agent CLIs are available before running work.")
-	}
-	add("sah me", "Check the connected account, credits, and trust.")
-}
-
-func addRunSuggestions(add func(command string, why string), state cliState) {
-	if state.DaemonInstalled {
-		add("sah contributions", "See the submissions and reviews attached to this machine's work.")
-		add("sah daemon status", "Confirm the background worker configuration and service state.")
-	} else {
-		add("sah daemon install", "Move from foreground runs to always-on background work.")
-		add("sah contributions", "See what was submitted recently.")
-	}
-	add("sah me", "Check your current credits and rank.")
-}
-
-func addAgentSuggestions(add func(command string, why string), state cliState) {
-	switch {
-	case !state.AuthConfigured:
-		add("sah auth login", "Sign in once this machine has the agent CLI setup you want.")
-	case state.HasDetectedAgent && !state.DaemonInstalled:
-		add("sah daemon install", "Start background work with the detected agent CLIs.")
-		add("sah run --once", "Claim one task now in the foreground.")
-	default:
-		addPhaseSuggestions(add, state)
-	}
-}
-
-func addPhaseSuggestions(add func(command string, why string), state cliState) {
-	switch state.Stage {
-	case stageSignedOut:
-		add("sah auth login", "Sign in from your browser and link this machine.")
-		add("sah agents", "Inspect which supported local agent CLIs `sah` can use here.")
-		add("sah help", "See the full command catalog and examples.")
-	case stageNeedsAgent:
-		add("sah agents", "Inspect which supported local agent CLIs are available on this machine.")
-		add("sah me", "Confirm the connected account before enabling work.")
-		add("sah help run", "See how foreground and background execution work.")
-	case stageReadyToRun:
-		add("sah daemon install", "Install and start the background worker.")
-		add("sah run --once", "Claim one task now in the foreground and exit.")
-		add("sah me", "Check credits, pending credits, trust, and rank.")
-	case stageDaemonStopped:
-		add("sah daemon start", "Start the background worker again.")
-		add("sah daemon status", "Check whether the installed service is healthy.")
-		add("sah contributions", "See recent submissions and reviews.")
-	case stageDaemonRunning:
-		add("sah contributions", "See recent submissions and reviews.")
-		add("sah me", "Check credits, pending credits, trust, and rank.")
-		add("sah daemon status", "Verify the background service state.")
-	}
-}
-
-func limitSuggestions(suggestions []commandSuggestion) []commandSuggestion {
-	if len(suggestions) <= maxSuggestions {
-		return suggestions
-	}
-	return suggestions[:maxSuggestions]
+	return toSuggestions(actions)
 }
 
 func normalizeHelpTopic(topic string) string {
-	trimmed := strings.ToLower(strings.TrimSpace(topic))
-	if trimmed == "" {
+	normalized := strings.ToLower(strings.TrimSpace(topic))
+	if normalized == "" {
 		return ""
 	}
-	if _, ok := guideByTopic[trimmed]; ok {
-		return trimmed
+	if strings.Contains(normalized, " ") {
+		return strings.Fields(normalized)[0]
 	}
-
-	parts := strings.Fields(trimmed)
-	if len(parts) == 0 {
-		return ""
-	}
-	if _, ok := guideByTopic[parts[0]]; ok {
-		return parts[0]
-	}
-	return ""
-}
-
-func guideForTopic(topic string) (commandGuide, bool) {
-	if topic == "" {
-		return commandGuide{}, false
-	}
-	guide, ok := guideByTopic[topic]
-	return guide, ok
+	return normalized
 }
 
 func canonicalCommandKey(args []string) string {
@@ -734,8 +626,6 @@ func canonicalCommandKey(args []string) string {
 	switch command {
 	case "version", "--version", "-version":
 		return "version"
-	case "upgrade":
-		return "upgrade"
 	case "auth", "daemon":
 		if len(args) > 1 {
 			subcommand := strings.ToLower(strings.TrimSpace(args[1]))
@@ -759,13 +649,7 @@ func isHelpToken(raw string) bool {
 }
 
 func isNotAuthenticatedError(err error) bool {
-	if err == nil {
-		return false
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "not authenticated") ||
-		strings.Contains(message, "api key rejected") ||
-		strings.Contains(message, "run `sah auth login` first")
+	return sah.IsAuthenticationFailure(err)
 }
 
 func resolveReleaseStatus(paths sah.Paths, baseURL string) (*sah.ClientReleaseStatus, error) {
@@ -777,25 +661,9 @@ func resolveReleaseStatus(paths sah.Paths, baseURL string) (*sah.ClientReleaseSt
 }
 
 func resolveClientRelease(paths sah.Paths, baseURL string) (*sah.ClientReleaseResponse, error) {
-	var cachedRelease *sah.ClientReleaseResponse
-	if strings.TrimSpace(paths.ReleaseCacheFile) != "" {
-		release, fresh, err := sah.CachedClientRelease(paths, sah.DefaultClientReleaseCacheTTL)
-		cachedRelease = release
-		if err == nil && fresh {
-			return cachedRelease, nil
-		}
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	release, refreshErr := sah.RefreshClientRelease(ctx, paths, baseURL)
-	if refreshErr == nil {
-		return release, nil
-	}
-	if cachedRelease != nil {
-		return cachedRelease, nil
-	}
-	return nil, refreshErr
+	return sah.NewCachedClient(paths, baseURL, "").GetClientRelease(ctx)
 }
 
 func displayVersion(raw string) string {
@@ -804,14 +672,6 @@ func displayVersion(raw string) string {
 		return "unknown"
 	}
 	return trimmed
-}
-
-func upgradeWhy(status *sah.ClientReleaseStatus) string {
-	target := releaseTargetVersion(status)
-	if target == "" {
-		return "Install the latest available SCIENCE@home CLI release."
-	}
-	return fmt.Sprintf("Install the recommended CLI release %s.", target)
 }
 
 func releaseTargetVersion(status *sah.ClientReleaseStatus) string {
