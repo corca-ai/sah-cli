@@ -1,0 +1,56 @@
+name: Tag Release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - VERSION
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Read requested version
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "VERSION must contain a semantic version like v0.8.0" >&2
+            exit 1
+          fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Decide whether a new tag is needed
+        id: plan
+        run: |
+          version="${{ steps.version.outputs.value }}"
+          head_sha="$(git rev-parse HEAD)"
+          if git rev-parse "$version" >/dev/null 2>&1; then
+            existing_sha="$(git rev-list -n 1 "$version")"
+            if [ "$existing_sha" = "$head_sha" ]; then
+              echo "create=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "Tag $version already exists at $existing_sha" >&2
+            exit 1
+          fi
+          echo "create=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create annotated tag
+        if: steps.plan.outputs.create == 'true'
+        run: |
+          version="${{ steps.version.outputs.value }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$version" -m "Release $version"
+          git push origin "$version"
