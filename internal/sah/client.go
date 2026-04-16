@@ -699,6 +699,9 @@ func (client *Client) doForm(
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set("Accept", "application/json")
+	if origin := httpURLOrigin(endpoint); origin != "" {
+		request.Header.Set("Origin", origin)
+	}
 	if version := CLIVersion(); version != "" {
 		request.Header.Set("X-SAH-CLI-Version", version)
 		request.Header.Set("User-Agent", "sah/"+version)
@@ -716,6 +719,18 @@ func (client *Client) doForm(
 		return decodeStatusError(response)
 	}
 	return decodeJSONResponse(response, out)
+}
+
+func httpURLOrigin(endpoint *url.URL) string {
+	if endpoint == nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(endpoint.Scheme)) {
+	case "http", "https":
+		return endpoint.Scheme + "://" + endpoint.Host
+	default:
+		return ""
+	}
 }
 
 func marshalJSONBody(body any) (io.Reader, error) {

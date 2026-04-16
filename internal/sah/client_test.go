@@ -27,6 +27,13 @@ func writeTestMeResponse(writer http.ResponseWriter) {
 	}`))
 }
 
+func assertRequestOrigin(t *testing.T, request *http.Request, want string) {
+	t.Helper()
+	if got := request.Header.Get("Origin"); got != want {
+		t.Fatalf("unexpected origin header: %q", got)
+	}
+}
+
 func newOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -44,6 +51,7 @@ func newOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 			if request.Method != http.MethodPost {
 				t.Fatalf("unexpected method: %s", request.Method)
 			}
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -62,6 +70,7 @@ func newOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 				"interval": 5
 			}`))
 		case "/oauth/token":
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -99,6 +108,7 @@ func newOAuthRefreshTestServer(t *testing.T, meCalls *atomic.Int32) *httptest.Se
 				"token_endpoint": %q
 			}`, server.URL, server.URL+"/oauth/device_authorization", server.URL+"/oauth/token")
 		case "/oauth/token":
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -143,6 +153,7 @@ func newCachedOAuthMetadataTestServer(t *testing.T, metadataCalls *atomic.Int32)
 				"token_endpoint": %q
 			}`, server.URL, server.URL+"/oauth/device_authorization", server.URL+"/oauth/token")
 		case "/oauth/device_authorization":
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -155,6 +166,7 @@ func newCachedOAuthMetadataTestServer(t *testing.T, metadataCalls *atomic.Int32)
 				"interval": 5
 			}`))
 		case "/oauth/token":
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -191,6 +203,7 @@ func newRedirectingOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 			if request.Method != http.MethodPost {
 				t.Fatalf("expected redirected device authorization to stay POST, got %s", request.Method)
 			}
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
@@ -211,6 +224,7 @@ func newRedirectingOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 			if request.Method != http.MethodPost {
 				t.Fatalf("expected redirected token request to stay POST, got %s", request.Method)
 			}
+			assertRequestOrigin(t, request, server.URL)
 			if err := request.ParseForm(); err != nil {
 				t.Fatalf("parse form: %v", err)
 			}
