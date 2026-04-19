@@ -7,15 +7,28 @@ import (
 )
 
 type Assignment struct {
-	AssignmentID       int64                  `json:"assignment_id"`
-	TaskType           string                 `json:"task_type"`
-	TaskKey            string                 `json:"task_key"`
-	Payload            map[string]any         `json:"payload"`
-	ProtocolVersion    string                 `json:"protocol_version,omitempty"`
-	InstructionVersion string                 `json:"instruction_version"`
-	SchemaVersion      string                 `json:"schema_version"`
-	Instructions       AssignmentInstructions `json:"instructions"`
-	Links              AssignmentLinks        `json:"_links,omitempty"`
+	AssignmentID       int64          `json:"assignment_id"`
+	TaskType           string         `json:"task_type"`
+	TaskKey            string         `json:"task_key"`
+	Payload            map[string]any `json:"payload"`
+	ProtocolVersion    string         `json:"protocol_version,omitempty"`
+	InstructionVersion string         `json:"instruction_version"`
+	SchemaVersion      string         `json:"schema_version"`
+	// Compatibility:
+	// - `agent_request` is the primary execution contract for sah-cli v0.9.x,
+	//   where the server owns the final agent prompt shape.
+	// - `instructions` remains the legacy/current fallback for sah-cli <= v0.8.x
+	//   and for any server that has not started emitting `agent_request` yet.
+	AgentRequest *AssignmentAgentRequest `json:"agent_request,omitempty"`
+	Instructions AssignmentInstructions  `json:"instructions,omitempty"`
+	Links        AssignmentLinks         `json:"_links,omitempty"`
+}
+
+type AssignmentAgentRequest struct {
+	Title          string `json:"title,omitempty"`
+	Description    string `json:"description,omitempty"`
+	Prompt         string `json:"prompt"`
+	ResponseSchema any    `json:"response_schema,omitempty"`
 }
 
 type AssignmentLink struct {

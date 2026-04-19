@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -140,7 +141,7 @@ func SolveAssignment(
 		return nil, err
 	}
 
-	prompt, err := BuildAgentPrompt(assignment)
+	request, err := ResolveAssignmentAgentRequest(assignment)
 	if err != nil {
 		return nil, err
 	}
@@ -162,7 +163,14 @@ func SolveAssignment(
 
 	model := ModelForAgent(agent.Name, options.Model, options.Models)
 	startedAt := time.Now()
-	output, rawOutput, err := executeAgent(runCtx, agent, model, workdir, prompt, options.BinaryPaths)
+	output, rawOutput, err := executeAgent(
+		runCtx,
+		agent,
+		model,
+		workdir,
+		request,
+		options.BinaryPaths,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -187,15 +195,15 @@ func executeAgent(
 	agent AgentSpec,
 	model string,
 	workdir string,
-	prompt string,
+	request *AssignmentAgentRequest,
 	binaryPaths map[string]string,
 ) (*structuredAgentOutput, string, error) {
-	command, useStdin, err := buildAgentCommand(ctx, agent, model, workdir, prompt, binaryPaths)
+	command, useStdin, err := buildAgentCommand(ctx, agent, model, workdir, request, binaryPaths)
 	if err != nil {
 		return nil, "", err
 	}
 	if useStdin {
-		command.Stdin = strings.NewReader(prompt)
+		command.Stdin = strings.NewReader(request.Prompt)
 	}
 
 	var stdout bytes.Buffer
@@ -239,10 +247,10 @@ func buildAgentCommand(
 	agent AgentSpec,
 	model string,
 	workdir string,
-	prompt string,
+	request *AssignmentAgentRequest,
 	binaryPaths map[string]string,
 ) (*exec.Cmd, bool, error) {
-	args, useStdin, err := agentCommandArgs(agent, prompt, workdir)
+	args, useStdin, err := agentCommandArgs(agent, request, workdir)
 	if err != nil {
 		return nil, false, err
 	}
@@ -257,19 +265,19 @@ func buildAgentCommand(
 	return command, useStdin, nil
 }
 
-func agentCommandArgs(agent AgentSpec, prompt string, workdir string) ([]string, bool, error) {
+func agentCommandArgs(
+	agent AgentSpec,
+	request *AssignmentAgentRequest,
+	workdir string,
+) ([]string, bool, error) {
+	prompt := ""
+	if request != nil {
+		prompt = request.Prompt
+	}
+
 	switch agent.Name {
 	case "codex":
-		return []string{
-			"exec",
-			"--json",
-			"--skip-git-repo-check",
-			"--sandbox", "read-only",
-			"--color", "never",
-			"--ephemeral",
-			"--cd", workdir,
-			"-",
-		}, true, nil
+		return buildCodexCommandArgs(request, workdir)
 	case "gemini":
 		return []string{
 			"--prompt", prompt,
@@ -278,17 +286,7 @@ func agentCommandArgs(agent AgentSpec, prompt string, workdir string) ([]string,
 			"--output-format", "stream-json",
 		}, false, nil
 	case "claude":
-		return []string{
-			"-p",
-			"--verbose",
-			"--output-format", "stream-json",
-			"--permission-mode", "plan",
-			"--tools", "",
-			"--strict-mcp-config",
-			"--disable-slash-commands",
-			"--no-session-persistence",
-			prompt,
-		}, false, nil
+		return buildClaudeCommandArgs(request, prompt)
 	case "qwen":
 		return []string{
 			"--prompt", prompt,
@@ -299,6 +297,69 @@ func agentCommandArgs(agent AgentSpec, prompt string, workdir string) ([]string,
 	default:
 		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
+}
+
+func buildCodexCommandArgs(request *AssignmentAgentRequest, workdir string) ([]string, bool, error) {
+	args := []string{
+		"exec",
+		"--json",
+		"--skip-git-repo-check",
+		"--sandbox", "read-only",
+		"--color", "never",
+		"--ephemeral",
+		"--cd", workdir,
+	}
+	if request != nil && request.ResponseSchema != nil {
+		schemaPath, err := writeOutputSchemaFile(workdir, request.ResponseSchema)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, "--output-schema", schemaPath)
+	}
+	args = append(args, "-")
+	return args, true, nil
+}
+
+func buildClaudeCommandArgs(request *AssignmentAgentRequest, prompt string) ([]string, bool, error) {
+	args := []string{
+		"-p",
+		"--verbose",
+		"--output-format", "stream-json",
+		"--permission-mode", "plan",
+		"--tools", "",
+		"--strict-mcp-config",
+		"--disable-slash-commands",
+		"--no-session-persistence",
+	}
+	if request != nil && request.ResponseSchema != nil {
+		schema, err := encodeInlineJSON(request.ResponseSchema)
+		if err != nil {
+			return nil, false, err
+		}
+		args = append(args, "--json-schema", schema)
+	}
+	args = append(args, prompt)
+	return args, false, nil
+}
+
+func writeOutputSchemaFile(workdir string, schema any) (string, error) {
+	data, err := json.Marshal(schema)
+	if err != nil {
+		return "", fmt.Errorf("encode response schema: %w", err)
+	}
+	path := filepath.Join(workdir, ".sah-output-schema.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", fmt.Errorf("write response schema: %w", err)
+	}
+	return path, nil
+}
+
+func encodeInlineJSON(value any) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", fmt.Errorf("encode response schema: %w", err)
+	}
+	return string(data), nil
 }
 
 func appendAgentModelArg(args []string, model string) []string {

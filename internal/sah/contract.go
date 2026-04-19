@@ -8,18 +8,23 @@ import (
 )
 
 const (
-	TaskProtocolHeader        = "X-SAH-Task-Protocol"
-	ClientCapabilitiesHeader  = "X-SAH-Client-Capabilities"
-	SupportedTaskProtocol     = "2026-04-11"
-	CapabilityAssignmentLinks = "assignment-links"
-	CapabilityScopedSubmit    = "assignment-scoped-submission"
-	CapabilityScopedRelease   = "assignment-scoped-release"
+	TaskProtocolHeader           = "X-SAH-Task-Protocol"
+	ClientCapabilitiesHeader     = "X-SAH-Client-Capabilities"
+	SupportedTaskProtocol        = "2026-04-11"
+	CapabilityAssignmentLinks    = "assignment-links"
+	CapabilityScopedSubmit       = "assignment-scoped-submission"
+	CapabilityScopedRelease      = "assignment-scoped-release"
+	CapabilityServerAgentRequest = "server-agent-request"
 )
 
 var supportedClientCapabilities = []string{
 	CapabilityAssignmentLinks,
 	CapabilityScopedSubmit,
 	CapabilityScopedRelease,
+	// Advertised by sah-cli v0.9.x, which can consume server-owned
+	// `agent_request` prompts directly. The server should not require this until
+	// additive rollout is complete for the v0.8.x line.
+	CapabilityServerAgentRequest,
 }
 
 type WorkerContractViolation struct {

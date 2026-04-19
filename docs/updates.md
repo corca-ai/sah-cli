@@ -65,3 +65,9 @@ The advertised headers are:
 - `X-SAH-Client-Capabilities`
 
 Today the built-in CLI capabilities cover assignment affordances such as assignment-scoped submit and release links. If the server requires a newer task protocol or new client capabilities, `sah run`, `sah daemon install`, and `sah daemon start` stop before starting worker traffic. If the contract changes after the worker has already started, the worker routes return a conflict and the CLI exits with an upgrade hint instead of looping forever.
+
+During the additive server-owned prompt rollout:
+
+- `sah-cli` <= `v0.8.x` still consumes `instructions` and renders the prompt locally.
+- `sah-cli` v0.9.x can advertise `server-agent-request` and consume `agent_request` directly.
+- The API should not require `server-agent-request` until the old `instructions`-based clients are no longer part of the supported rollout window.

@@ -6,7 +6,38 @@ import (
 	"strings"
 )
 
+func ResolveAssignmentAgentRequest(assignment Assignment) (*AssignmentAgentRequest, error) {
+	if assignment.AgentRequest != nil && strings.TrimSpace(assignment.AgentRequest.Prompt) != "" {
+		// Compatibility:
+		// - sah-cli v0.9.x uses the server-owned execution contract when present.
+		// - Older servers and <= v0.8.x assignment shapes still fall back to the
+		//   legacy instructions-based prompt builder below.
+		return assignment.AgentRequest, nil
+	}
+
+	prompt, err := BuildLegacyAgentPrompt(assignment)
+	if err != nil {
+		return nil, err
+	}
+	return &AssignmentAgentRequest{
+		Title:          assignment.TaskType,
+		Description:    "Return one JSON object that matches the submission schema.",
+		Prompt:         prompt,
+		ResponseSchema: assignment.Instructions.SubmissionSchema,
+	}, nil
+}
+
 func BuildAgentPrompt(assignment Assignment) (string, error) {
+	request, err := ResolveAssignmentAgentRequest(assignment)
+	if err != nil {
+		return "", err
+	}
+	return request.Prompt, nil
+}
+
+func BuildLegacyAgentPrompt(assignment Assignment) (string, error) {
+	// Compatibility shim for sah-cli <= v0.8.x and for servers that still only
+	// expose the prompt-authoring `instructions` shape.
 	payloadJSON, err := prettyJSON(assignment.Payload)
 	if err != nil {
 		return "", fmt.Errorf("encode assignment payload: %w", err)

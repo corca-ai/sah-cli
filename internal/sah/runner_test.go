@@ -2,6 +2,7 @@ package sah
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,7 +121,7 @@ func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
 		AgentSpec{Name: "claude", Binary: "claude"},
 		"sonnet",
 		t.TempDir(),
-		`{"ok":true}`,
+		&AssignmentAgentRequest{Prompt: `{"ok":true}`},
 		map[string]string{"claude": path},
 	)
 	if err != nil {
@@ -150,7 +151,7 @@ func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
 		AgentSpec{Name: "qwen", Binary: "qwen"},
 		"",
 		t.TempDir(),
-		`{"ok":true}`,
+		&AssignmentAgentRequest{Prompt: `{"ok":true}`},
 		map[string]string{"qwen": path},
 	)
 	if err != nil {
@@ -170,4 +171,137 @@ func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
 	if !strings.Contains(args, "--sandbox") {
 		t.Fatalf("expected qwen args to enable sandboxing, got %q", args)
 	}
+}
+
+func TestResolveAssignmentAgentRequestPrefersServerOwnedRequest(t *testing.T) {
+	request, err := ResolveAssignmentAgentRequest(Assignment{
+		TaskType: "verification",
+		AgentRequest: &AssignmentAgentRequest{
+			Title:          "Verification assignment",
+			Description:    "Return one JSON object.",
+			Prompt:         "server-owned prompt",
+			ResponseSchema: map[string]any{"type": "object"},
+		},
+		Instructions: AssignmentInstructions{
+			Summary: "legacy summary",
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveAssignmentAgentRequest returned error: %v", err)
+	}
+	if request.Prompt != "server-owned prompt" {
+		t.Fatalf("expected server-owned prompt, got %q", request.Prompt)
+	}
+}
+
+func TestResolveAssignmentAgentRequestFallsBackToLegacyInstructions(t *testing.T) {
+	request, err := ResolveAssignmentAgentRequest(Assignment{
+		AssignmentID:       41,
+		TaskType:           "verification",
+		TaskKey:            "verification",
+		InstructionVersion: "2026-04-12.2",
+		SchemaVersion:      "2026-04-11",
+		Payload:            map[string]any{"title": "A"},
+		Instructions: AssignmentInstructions{
+			Summary:          "Approve only",
+			Rules:            []string{"rule 1"},
+			BadPatterns:      []string{"pattern 1"},
+			StopConditions:   []string{"stop 1"},
+			GoodExamples:     []any{map[string]any{"verdict": "approve"}},
+			SubmissionSchema: map[string]any{"type": "object"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveAssignmentAgentRequest returned error: %v", err)
+	}
+	if !strings.Contains(request.Prompt, "assignment_id: 41") {
+		t.Fatalf("expected legacy prompt to include assignment metadata, got %q", request.Prompt)
+	}
+	if !strings.Contains(request.Prompt, "Submission schema:") {
+		t.Fatalf("expected legacy prompt to include submission schema, got %q", request.Prompt)
+	}
+}
+
+func TestBuildAgentCommandForCodexIncludesOutputSchemaFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+	workdir := t.TempDir()
+
+	command, useStdin, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "codex", Binary: "codex"},
+		"",
+		workdir,
+		&AssignmentAgentRequest{
+			Prompt:         `{"ok":true}`,
+			ResponseSchema: map[string]any{"type": "object", "required": []string{"answer"}},
+		},
+		map[string]string{"codex": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+	if !useStdin {
+		t.Fatal("expected codex prompt to be passed over stdin")
+	}
+
+	args := command.Args[1:]
+	index := indexOf(args, "--output-schema")
+	if index < 0 || index+1 >= len(args) {
+		t.Fatalf("expected codex args to include --output-schema, got %q", strings.Join(args, " "))
+	}
+	schemaPath := args[index+1]
+	data, err := os.ReadFile(schemaPath)
+	if err != nil {
+		t.Fatalf("read schema file: %v", err)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(data, &schema); err != nil {
+		t.Fatalf("decode schema file: %v", err)
+	}
+	if schema["type"] != "object" {
+		t.Fatalf("unexpected schema: %#v", schema)
+	}
+}
+
+func TestBuildAgentCommandForClaudeIncludesJSONSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, _, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "claude", Binary: "claude"},
+		"",
+		t.TempDir(),
+		&AssignmentAgentRequest{
+			Prompt:         `{"ok":true}`,
+			ResponseSchema: map[string]any{"type": "object", "required": []string{"answer"}},
+		},
+		map[string]string{"claude": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+
+	args := command.Args[1:]
+	index := indexOf(args, "--json-schema")
+	if index < 0 || index+1 >= len(args) {
+		t.Fatalf("expected claude args to include --json-schema, got %q", strings.Join(args, " "))
+	}
+	if !strings.Contains(args[index+1], `"type":"object"`) {
+		t.Fatalf("unexpected inline schema: %q", args[index+1])
+	}
+}
+
+func indexOf(values []string, target string) int {
+	for index, value := range values {
+		if value == target {
+			return index
+		}
+	}
+	return -1
 }

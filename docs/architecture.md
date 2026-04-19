@@ -30,7 +30,8 @@ The browser still never receives the CLI's stored bearer token. Legacy `/api/cli
 
 - `sah` claims work with `POST /s@h/assignments` using `Authorization: Bearer` when an OAuth access token is available, or a stored legacy `X-API-Key` otherwise.
 - The assignment response can include a protocol version plus `_links.self`, `_links.submit`, and `_links.release`, and the same submit/release relations can also be exposed through the HTTP `Link` header.
-- It builds a task-only prompt from the returned assignment payload and instructions.
+- During rollout, assignment responses may include both `agent_request` and `instructions`.
+  `sah-cli` v0.9.x prefers the server-owned `agent_request` execution contract, while `<= v0.8.x` still renders the final prompt locally from `instructions`.
 - It runs one of the supported local agent CLIs: `codex`, `gemini`, `claude`, or `qwen`.
 - The agent receives no SCIENCE@home credential and runs in an empty temporary working directory.
 - The CLI parses the agent stdout as JSON and follows the assignment-scoped submit link when present, falling back to the legacy contribution endpoint when it is not.

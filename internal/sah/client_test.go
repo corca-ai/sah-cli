@@ -245,10 +245,10 @@ func newRedirectingOAuthDeviceFlowTestServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
-	t.Parallel()
+func newAssignmentResponseServer(t *testing.T, body string) *httptest.Server {
+	t.Helper()
 
-	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+	return httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", request.Method)
 		}
@@ -269,13 +269,26 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 			`</s@h/assignments/41/submission>; rel="submit", </s@h/assignments/41>; rel="release"`,
 		)
 		writer.Header().Set("Content-Type", "application/json")
-		_, _ = writer.Write([]byte(`{
+		_, _ = writer.Write([]byte(body))
+	}))
+}
+
+func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
+	t.Parallel()
+
+	server := newAssignmentResponseServer(t, `{
 			"assignment_id": 41,
 			"task_type": "novel-task",
 			"task_key": "novel-task/v1",
 			"payload": {"title": "Paper"},
 			"instruction_version": "2026-04-10",
 			"schema_version": "2026-04-09",
+			"agent_request": {
+				"title": "Novel task assignment",
+				"description": "Return one JSON object.",
+				"prompt": "server-owned prompt",
+				"response_schema": {"type": "object"}
+			},
 			"instructions": {
 				"summary": "Do the assignment.",
 				"rules": [],
@@ -284,8 +297,7 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 				"submission_schema": {"type": "object"},
 				"stop_conditions": []
 			}
-		}`))
-	}))
+		}`)
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-key")
@@ -299,6 +311,9 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 	}
 	if assignment.Links.Release.Href != "/s@h/assignments/41" {
 		t.Fatalf("unexpected release href: %q", assignment.Links.Release.Href)
+	}
+	if assignment.AgentRequest == nil || assignment.AgentRequest.Prompt != "server-owned prompt" {
+		t.Fatalf("expected server-owned agent request, got %#v", assignment.AgentRequest)
 	}
 }
 
