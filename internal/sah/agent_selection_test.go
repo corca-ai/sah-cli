@@ -1,6 +1,8 @@
 package sah
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -69,4 +71,69 @@ func TestResolveAgentPoolRotateInstalledReturnsFriendlyErrorWhenNothingDetected(
 	if !strings.Contains(err.Error(), "sah agents") {
 		t.Fatalf("expected detection guidance in error, got %v", err)
 	}
+}
+
+func TestResolveAgentPoolPrefersExplicitAgentOverConfiguredPool(t *testing.T) {
+	binaryPaths := testSelectionBinaryPaths(t, "codex", "claude", "gemini")
+	config := DefaultConfig()
+	config.AgentPool = []string{"claude", "gemini"}
+
+	pool, err := ResolveAgentPool(config, WorkerOptions{
+		Agent:       "codex",
+		BinaryPaths: binaryPaths,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	if got := joinSelectionAgentNames(pool); got != "codex" {
+		t.Fatalf("expected explicit agent to override configured pool, got %q", got)
+	}
+}
+
+func TestResolveAgentPoolPrefersExplicitAgentOverConfiguredRotateInstalled(t *testing.T) {
+	binaryPaths := testSelectionBinaryPaths(t, "codex", "claude", "gemini")
+	config := DefaultConfig()
+	config.RotateInstalled = true
+
+	pool, err := ResolveAgentPool(config, WorkerOptions{
+		Agent:       "codex",
+		BinaryPaths: binaryPaths,
+	})
+	if err != nil {
+		t.Fatalf("ResolveAgentPool returned error: %v", err)
+	}
+	if got := joinSelectionAgentNames(pool); got != "codex" {
+		t.Fatalf("expected explicit agent to override rotate-installed config, got %q", got)
+	}
+}
+
+func testSelectionBinaryPaths(t *testing.T, agents ...string) map[string]string {
+	t.Helper()
+
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+
+	binaryPaths := make(map[string]string, len(agents))
+	for _, agent := range agents {
+		binaryPaths[agent] = writeSelectionExecutable(t, dir, agent)
+	}
+	return binaryPaths
+}
+
+func writeSelectionExecutable(t *testing.T, dir string, name string) string {
+	t.Helper()
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable %s: %v", name, err)
+	}
+	return path
+}
+
+func joinSelectionAgentNames(pool []AgentSpec) string {
+	names := make([]string, 0, len(pool))
+	for _, agent := range pool {
+		names = append(names, agent.Name)
+	}
+	return strings.Join(names, ", ")
 }

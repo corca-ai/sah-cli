@@ -38,15 +38,18 @@ func ResolveAgentPool(config Config, options WorkerOptions) ([]AgentSpec, error)
 		return resolveInstalledAgentPool(binaryPaths)
 	case len(options.Agents) > 0:
 		return resolveNamedAgentPool(options.Agents, binaryPaths)
+	case strings.TrimSpace(options.Agent) != "":
+		agent, err := ResolveAgentWithBinaryPaths(options.Agent, binaryPaths)
+		if err != nil {
+			return nil, err
+		}
+		return []AgentSpec{agent}, nil
 	case config.RotateInstalled:
 		return resolveInstalledAgentPool(binaryPaths)
 	case len(config.AgentPool) > 0:
 		return resolveNamedAgentPool(config.AgentPool, binaryPaths)
 	default:
-		name := strings.TrimSpace(options.Agent)
-		if name == "" {
-			name = config.DefaultAgent
-		}
+		name := config.DefaultAgent
 		agent, err := ResolveAgentWithBinaryPaths(name, binaryPaths)
 		if err != nil {
 			return nil, err
