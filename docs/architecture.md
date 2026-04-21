@@ -26,6 +26,13 @@
 
 The browser still never receives the CLI's stored bearer token. Legacy `/api/cli/device-authorizations`, `/api/cli/device-token`, `/cli/authorize`, and `/api/cli/exchange` routes remain server-side for older clients, but the current CLI now prefers the standard OAuth device flow and only falls back implicitly when an older stored API key is already present in local config.
 
+Server-side JWT signing-key rotation is intentionally transparent to the CLI.
+The CLI stores opaque OAuth tokens and does not know the signing secret. When
+`sah-web` and `e2` keep the previous key during a rollover, the next successful
+refresh reissues the local token set under the active key. If the server removes
+the previous key before a stored refresh token migrates, the CLI clears the
+rejected OAuth tokens and asks the user to run `sah auth login` again.
+
 ## Worker Loop
 
 - `sah` claims work with `POST /s@h/assignments` using `Authorization: Bearer` when an OAuth access token is available, or a stored legacy `X-API-Key` otherwise.
