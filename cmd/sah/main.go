@@ -451,7 +451,7 @@ func buildRunWorkerOptions(
 	}
 
 	return sah.WorkerOptions{
-		Agent:           pickString(commandOptions.Agent, config.DefaultAgent),
+		Agent:           strings.TrimSpace(commandOptions.Agent),
 		Agents:          agentPool,
 		RotateInstalled: commandOptions.RotateInstalled,
 		BinaryPaths:     session.binaryPaths,

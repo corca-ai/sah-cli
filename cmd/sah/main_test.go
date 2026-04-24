@@ -201,6 +201,46 @@ func TestApplyDaemonInstallOptionsKeepsGlobalModelPinnedConfig(t *testing.T) {
 	}
 }
 
+func TestBuildRunWorkerSessionUsesConfiguredAgentPool(t *testing.T) {
+	binaryPaths := testAgentBinaryPaths(t, "codex", "gemini")
+	config := sah.DefaultConfig()
+	config.AgentPool = []string{"gemini"}
+
+	workerOptions, picker, err := buildRunWorkerSession(runSession{
+		config:      config,
+		binaryPaths: binaryPaths,
+	}, runCommandOptions{})
+	if err != nil {
+		t.Fatalf("buildRunWorkerSession returned error: %v", err)
+	}
+	if workerOptions.Agent != "" {
+		t.Fatalf("expected no explicit worker agent, got %q", workerOptions.Agent)
+	}
+	if got := joinAgentNames(picker.Pool()); got != "gemini" {
+		t.Fatalf("expected configured agent pool gemini, got %q", got)
+	}
+}
+
+func TestBuildRunWorkerSessionUsesConfiguredRotateInstalled(t *testing.T) {
+	binaryPaths := testAgentBinaryPaths(t, "codex", "gemini")
+	config := sah.DefaultConfig()
+	config.RotateInstalled = true
+
+	workerOptions, picker, err := buildRunWorkerSession(runSession{
+		config:      config,
+		binaryPaths: binaryPaths,
+	}, runCommandOptions{})
+	if err != nil {
+		t.Fatalf("buildRunWorkerSession returned error: %v", err)
+	}
+	if workerOptions.Agent != "" {
+		t.Fatalf("expected no explicit worker agent, got %q", workerOptions.Agent)
+	}
+	if got := joinAgentNames(picker.Pool()); got != "codex, gemini" {
+		t.Fatalf("expected installed agent pool codex, gemini, got %q", got)
+	}
+}
+
 func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *testing.T) {
 	t.Setenv("PATH", "")
 	config := sah.DefaultConfig()
