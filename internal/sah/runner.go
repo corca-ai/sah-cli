@@ -262,7 +262,21 @@ func buildAgentCommand(
 
 	command := exec.CommandContext(ctx, commandPath, args...)
 	command.Dir = workdir
+	command.Env = agentCommandEnv(agent)
 	return command, useStdin, nil
+}
+
+func agentCommandEnv(agent AgentSpec) []string {
+	if agent.Name != "claude" {
+		return nil
+	}
+	return append(
+		os.Environ(),
+		"CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1",
+		"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1",
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+		"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1",
+	)
 }
 
 func agentCommandArgs(
@@ -284,6 +298,7 @@ func agentCommandArgs(
 			"--sandbox", "true",
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
+			"-e", "none",
 		}, false, nil
 	case "claude":
 		return buildClaudeCommandArgs(request, prompt)
@@ -330,6 +345,8 @@ func buildClaudeCommandArgs(request *AssignmentAgentRequest, prompt string) ([]s
 		"--strict-mcp-config",
 		"--disable-slash-commands",
 		"--no-session-persistence",
+		"--exclude-dynamic-system-prompt-sections",
+		"--setting-sources", "local",
 	}
 	if request != nil && request.ResponseSchema != nil {
 		schema, err := encodeInlineJSON(request.ResponseSchema)
@@ -482,40 +499,73 @@ func parseAssistantResultStructuredOutput(
 ) (*structuredAgentOutput, error) {
 	output := &structuredAgentOutput{}
 	var assistantText strings.Builder
+	structuredText := ""
 
 	if err := parseJSONLines(raw, func(event map[string]any) {
 		switch stringValue(event["type"]) {
 		case "assistant":
-			message := mapValue(event["message"])
-			content := arrayValue(message["content"])
-			for _, item := range content {
-				block := mapValue(item)
-				if stringValue(block["type"]) != "text" {
-					continue
-				}
-				text := strings.TrimSpace(stringValue(block["text"]))
-				if text != "" {
-					if assistantText.Len() > 0 {
-						assistantText.WriteString("\n")
-					}
-					assistantText.WriteString(text)
-				}
-			}
+			appendAssistantText(&assistantText, event)
 		case "result":
-			output.Usage = parseUsage(mapValue(event["usage"]))
-			if boolValue(event["is_error"]) && output.AgentError == "" {
-				output.AgentError = strings.TrimSpace(stringValue(event["result"]))
-				if output.AgentError == "" {
-					output.AgentError = strings.TrimSpace(stringValue(event["subtype"]))
-				}
-			}
+			structuredText = applyAssistantResultEvent(output, event, structuredText, parseUsage)
 		}
 	}); err != nil {
 		return nil, err
 	}
 
 	output.Text = strings.TrimSpace(assistantText.String())
+	if output.Text == "" {
+		output.Text = structuredText
+	}
 	return output, nil
+}
+
+func appendAssistantText(builder *strings.Builder, event map[string]any) {
+	message := mapValue(event["message"])
+	content := arrayValue(message["content"])
+	for _, item := range content {
+		block := mapValue(item)
+		if stringValue(block["type"]) != "text" {
+			continue
+		}
+		text := strings.TrimSpace(stringValue(block["text"]))
+		if text == "" {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteString("\n")
+		}
+		builder.WriteString(text)
+	}
+}
+
+func applyAssistantResultEvent(
+	output *structuredAgentOutput,
+	event map[string]any,
+	structuredText string,
+	parseUsage func(map[string]any) TokenUsage,
+) string {
+	output.Usage = parseUsage(mapValue(event["usage"]))
+	if structuredText == "" {
+		structuredText = compactJSONText(event["structured_output"])
+	}
+	if boolValue(event["is_error"]) && output.AgentError == "" {
+		output.AgentError = strings.TrimSpace(stringValue(event["result"]))
+		if output.AgentError == "" {
+			output.AgentError = strings.TrimSpace(stringValue(event["subtype"]))
+		}
+	}
+	return structuredText
+}
+
+func compactJSONText(value any) string {
+	if value == nil {
+		return ""
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 func parseJSONLines(raw string, visit func(map[string]any)) error {

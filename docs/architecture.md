@@ -41,6 +41,11 @@ rejected OAuth tokens and asks the user to run `sah auth login` again.
   `sah-cli` v0.9.x prefers the server-owned `agent_request` execution contract, while `<= v0.8.x` still renders the final prompt locally from `instructions`.
 - It runs one of the supported local agent CLIs: `codex`, `gemini`, `claude`, or `qwen`.
 - The agent receives no SCIENCE@home credential and runs in an empty temporary working directory.
+- Headless agent invocations are intentionally constrained:
+  - Codex runs with `exec --json`, read-only sandboxing, `--ephemeral`, and an output schema file when the assignment provides one.
+  - Gemini runs in sandboxed plan mode, emits `stream-json`, and disables extensions with `-e none`.
+  - Claude runs in print/stream-json plan mode with tools, slash commands, user/project settings, session persistence, user plugins, auto-memory, and built-in agents disabled where Claude Code exposes controls. When Claude returns schema output through `structured_output`, `sah` treats that as the submission payload.
+  - Qwen runs in sandboxed plan mode and emits `stream-json`.
 - The CLI parses the agent stdout as JSON and follows the assignment-scoped submit link when present, falling back to the legacy contribution endpoint when it is not.
 - If the local agent aborts, fails locally, or hits a submission error, `sah` releases the assignment immediately so the assignment does not stay pinned at the open-assignment limit until expiry.
 

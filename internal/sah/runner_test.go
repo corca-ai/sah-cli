@@ -58,6 +58,19 @@ func TestParseClaudeStructuredOutput(t *testing.T) {
 	}
 }
 
+func TestParseClaudeStructuredOutputUsesStructuredOutputFallback(t *testing.T) {
+	raw := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"StructuredOutput","input":{"ok":true}}]}}
+{"type":"result","is_error":false,"result":"","structured_output":{"ok":true},"usage":{"input_tokens":3,"output_tokens":8}}`
+
+	output, err := parseClaudeStructuredOutput(raw)
+	if err != nil {
+		t.Fatalf("parseClaudeStructuredOutput returned error: %v", err)
+	}
+	if output.Text != `{"ok":true}` {
+		t.Fatalf("unexpected text: %q", output.Text)
+	}
+}
+
 func TestParseQwenStructuredOutput(t *testing.T) {
 	raw := `{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"internal"},{"type":"text","text":"{\"ok\":true}"}]}}
 {"type":"result","subtype":"success","is_error":false,"usage":{"input_tokens":21,"cache_read_input_tokens":4,"output_tokens":6,"total_tokens":27}}`
@@ -137,6 +150,47 @@ func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
 	}
 	if !strings.Contains(args, "--disable-slash-commands") {
 		t.Fatalf("expected claude args to include --disable-slash-commands, got %q", args)
+	}
+	if !strings.Contains(args, "--exclude-dynamic-system-prompt-sections") {
+		t.Fatalf("expected claude args to exclude dynamic system prompt sections, got %q", args)
+	}
+	if !strings.Contains(args, "--setting-sources local") {
+		t.Fatalf("expected claude args to ignore user/project settings, got %q", args)
+	}
+	env := strings.Join(command.Env, "\n")
+	for _, entry := range []string{
+		"CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1",
+		"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1",
+		"CLAUDE_CODE_DISABLE_AUTO_MEMORY=1",
+		"CLAUDE_AGENT_SDK_DISABLE_BUILTIN_AGENTS=1",
+	} {
+		if !strings.Contains(env, entry) {
+			t.Fatalf("expected claude env to include %s, got %q", entry, env)
+		}
+	}
+}
+
+func TestBuildAgentCommandForGeminiDisablesExtensions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "gemini")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	command, _, err := buildAgentCommand(
+		context.Background(),
+		AgentSpec{Name: "gemini", Binary: "gemini"},
+		"gemini-3-flash-base",
+		t.TempDir(),
+		&AssignmentAgentRequest{Prompt: `{"ok":true}`},
+		map[string]string{"gemini": path},
+	)
+	if err != nil {
+		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+
+	args := strings.Join(command.Args[1:], " ")
+	if !strings.Contains(args, "-e none") {
+		t.Fatalf("expected gemini args to disable extensions, got %q", args)
 	}
 }
 
