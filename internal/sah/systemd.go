@@ -110,7 +110,7 @@ func systemdServiceEnvironment() map[string]string {
 }
 
 func systemdQuote(value string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, `%`, `%%`)
 	return `"` + replacer.Replace(value) + `"`
 }
 

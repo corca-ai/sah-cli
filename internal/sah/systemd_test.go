@@ -29,6 +29,27 @@ func TestRenderSystemdUserUnitIncludesEnvironmentAndWorkingDirectory(t *testing.
 	}
 }
 
+func TestRenderSystemdUserUnitEscapesPercentSpecifiers(t *testing.T) {
+	unit := renderSystemdUserUnit(
+		"/home/tester/bin/%sah",
+		DefaultLaunchdCommand,
+		"/home/tester/%work",
+		map[string]string{
+			"XDG_STATE_HOME": "/home/tester/state-%i",
+		},
+	)
+
+	for _, snippet := range []string{
+		`WorkingDirectory="/home/tester/%%work"`,
+		`ExecStart="/home/tester/bin/%%sah" "run" "--daemon"`,
+		`Environment="XDG_STATE_HOME=/home/tester/state-%%i"`,
+	} {
+		if !strings.Contains(unit, snippet) {
+			t.Fatalf("expected unit to contain %q, got:\n%s", snippet, unit)
+		}
+	}
+}
+
 func TestSystemdServiceEnvironmentFallsBackToDefaultPath(t *testing.T) {
 	t.Setenv("PATH", "")
 	t.Setenv("HOME", "/home/tester")
