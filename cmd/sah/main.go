@@ -21,6 +21,7 @@ import (
 var version = "dev"
 
 const leaderboardVisibleRows = 15
+const maxContributionsLimit = 100
 
 type reportedError struct {
 	err     error
@@ -902,6 +903,9 @@ func contributionsCmd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return handleFlagParseError(err)
 	}
+	if err := validateContributionsLimit(*limit); err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -926,6 +930,13 @@ func contributionsCmd(args []string) error {
 	printHistorySection("Submissions", response.Submissions)
 	fmt.Println()
 	printHistorySection("Reviews", response.Reviews)
+	return nil
+}
+
+func validateContributionsLimit(limit int) error {
+	if limit < 1 || limit > maxContributionsLimit {
+		return fmt.Errorf("--limit must be between 1 and %d", maxContributionsLimit)
+	}
 	return nil
 }
 

@@ -271,6 +271,20 @@ func TestParseAuthLoginFlagsAcceptsDeprecatedNoOpen(t *testing.T) {
 	}
 }
 
+func TestValidateContributionsLimit(t *testing.T) {
+	for _, limit := range []int{1, 10, maxContributionsLimit} {
+		if err := validateContributionsLimit(limit); err != nil {
+			t.Fatalf("expected limit %d to be valid, got %v", limit, err)
+		}
+	}
+
+	for _, limit := range []int{0, -1, maxContributionsLimit + 1} {
+		if err := validateContributionsLimit(limit); err == nil {
+			t.Fatalf("expected limit %d to be rejected", limit)
+		}
+	}
+}
+
 func TestLeaderboardDisplayEntriesKeepsTop15AndAppendsViewer(t *testing.T) {
 	entries := make([]sah.LeaderboardEntry, 0, 20)
 	for index := range 20 {
