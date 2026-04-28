@@ -264,6 +264,7 @@ func runCmd(args []string) error {
 type runCommandOptions struct {
 	Agent           string
 	Agents          string
+	AgentsSpecified bool
 	RotateInstalled bool
 	Model           string
 	Models          string
@@ -303,6 +304,10 @@ func parseRunCommandOptions(args []string) (runCommandOptions, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return runCommandOptions{}, handleFlagParseError(err)
+	}
+	options.AgentsSpecified = flagWasProvided(fs, "agents")
+	if err := validateAgentsFlag(options.Agents, options.AgentsSpecified); err != nil {
+		return runCommandOptions{}, err
 	}
 	if err := validateAgentFlags(options.Agent, options.Agents, options.RotateInstalled); err != nil {
 		return runCommandOptions{}, err
@@ -421,6 +426,9 @@ func resolveRunAgentPool(
 		}
 	}
 
+	if err := validateAgentsFlag(commandOptions.Agents, commandOptions.AgentsSpecified); err != nil {
+		return nil, err
+	}
 	agentPool := sah.ParseAgentList(commandOptions.Agents)
 	if len(agentPool) == 0 {
 		return nil, nil
@@ -495,6 +503,7 @@ func daemonCmd(args []string) error {
 type daemonInstallOptions struct {
 	agent           string
 	agents          string
+	agentsSpecified bool
 	rotateInstalled bool
 	model           string
 	models          string
@@ -575,6 +584,10 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	if err := fs.Parse(args); err != nil {
 		return daemonInstallOptions{}, handleFlagParseError(err)
 	}
+	options.agentsSpecified = flagWasProvided(fs, "agents")
+	if err := validateAgentsFlag(options.agents, options.agentsSpecified); err != nil {
+		return daemonInstallOptions{}, err
+	}
 	if err := validateAgentFlags(options.agent, options.agents, options.rotateInstalled); err != nil {
 		return daemonInstallOptions{}, err
 	}
@@ -627,6 +640,9 @@ func applyExplicitDaemonSelection(
 			return false, err
 		}
 		return true, nil
+	}
+	if err := validateAgentsFlag(options.agents, options.agentsSpecified); err != nil {
+		return false, err
 	}
 	if pool := sah.ParseAgentList(options.agents); len(pool) > 0 {
 		if err := setDaemonAgentPool(config, pool, binaryPaths); err != nil {
@@ -1228,6 +1244,26 @@ func validateAgentFlags(agent string, agents string, rotateInstalled bool) error
 		return fmt.Errorf("--agent cannot be combined with --agents")
 	}
 	return nil
+}
+
+func validateAgentsFlag(raw string, specified bool) error {
+	if !specified && strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if len(sah.ParseAgentList(raw)) == 0 {
+		return fmt.Errorf("--agents must include at least one agent")
+	}
+	return nil
+}
+
+func flagWasProvided(fs *flag.FlagSet, name string) bool {
+	found := false
+	fs.Visit(func(flag *flag.Flag) {
+		if flag.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func handleFlagParseError(err error) error {

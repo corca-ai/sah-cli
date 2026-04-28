@@ -261,6 +261,39 @@ func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *te
 	}
 }
 
+func TestParseRunCommandOptionsRejectsEmptyAgentList(t *testing.T) {
+	for _, args := range [][]string{
+		{"--agents", ","},
+		{"--agents", ""},
+	} {
+		if _, err := parseRunCommandOptions(args); err == nil {
+			t.Fatalf("expected args %#v to reject empty agent list", args)
+		}
+	}
+}
+
+func TestParseDaemonInstallOptionsRejectsEmptyAgentList(t *testing.T) {
+	for _, args := range [][]string{
+		{"--agents", ","},
+		{"--agents", ""},
+	} {
+		if _, err := parseDaemonInstallOptions(args); err == nil {
+			t.Fatalf("expected args %#v to reject empty agent list", args)
+		}
+	}
+}
+
+func TestApplyDaemonInstallOptionsRejectsEmptyAgentList(t *testing.T) {
+	config := sah.DefaultConfig()
+	err := applyDaemonInstallOptions(&config, daemonInstallOptions{agents: ","}, nil)
+	if err == nil {
+		t.Fatal("expected empty explicit daemon agent list to be rejected")
+	}
+	if config.RotateInstalled {
+		t.Fatal("expected empty explicit daemon agent list not to enable rotate-installed")
+	}
+}
+
 func TestParseAuthLoginFlagsAcceptsDeprecatedNoOpen(t *testing.T) {
 	baseURL, err := parseAuthLoginFlags([]string{"--base-url", "http://localhost:8000", "--no-open"})
 	if err != nil {
