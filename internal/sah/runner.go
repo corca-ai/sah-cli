@@ -217,7 +217,7 @@ func executeAgent(
 
 	if runErr != nil {
 		message := strings.TrimSpace(stderr.String())
-		if message == "" && output.AgentError != "" {
+		if message == "" && output != nil && output.AgentError != "" {
 			message = output.AgentError
 		}
 		if message == "" && parseErr != nil {

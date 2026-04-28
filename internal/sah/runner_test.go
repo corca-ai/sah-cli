@@ -227,6 +227,32 @@ func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
 	}
 }
 
+func TestExecuteAgentReturnsParseErrorWhenFailedAgentPrintsInvalidJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "codex")
+	script := "#!/bin/sh\nprintf 'not-json\\n'\nexit 1\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("write executable: %v", err)
+	}
+
+	_, rawOutput, err := executeAgent(
+		context.Background(),
+		AgentSpec{Name: "codex", Binary: "codex"},
+		"",
+		t.TempDir(),
+		&AssignmentAgentRequest{Prompt: `{"ok":true}`},
+		map[string]string{"codex": path},
+	)
+	if err == nil {
+		t.Fatal("expected executeAgent to return an error")
+	}
+	if rawOutput != "not-json\n" {
+		t.Fatalf("unexpected raw output: %q", rawOutput)
+	}
+	if !strings.Contains(err.Error(), "decode json line") {
+		t.Fatalf("expected parse error in message, got %v", err)
+	}
+}
+
 func TestResolveAssignmentAgentRequestPrefersServerOwnedRequest(t *testing.T) {
 	request, err := ResolveAssignmentAgentRequest(Assignment{
 		TaskType: "verification",
