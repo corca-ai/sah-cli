@@ -51,6 +51,8 @@ type structuredAgentOutput struct {
 
 var errNoSupportedAgentCLI = errors.New("no supported agent CLI found")
 
+const maxAgentStreamBytes = 8 * 1024 * 1024
+
 var SupportedAgents = []AgentSpec{
 	{Name: "codex", Binary: "codex", Description: "OpenAI Codex CLI"},
 	{Name: "gemini", Binary: "gemini", Description: "Google Gemini CLI"},
@@ -206,17 +208,20 @@ func executeAgent(
 		command.Stdin = strings.NewReader(agentRequestPrompt(request))
 	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	stdout := newLimitedBuffer(maxAgentStreamBytes)
+	stderr := newLimitedBuffer(maxAgentStreamBytes)
+	command.Stdout = stdout
+	command.Stderr = stderr
 
 	runErr := command.Run()
 	rawOutput := stdout.String()
+	if stdout.Truncated() {
+		return nil, rawOutput, fmt.Errorf("%s stdout exceeded %d bytes", agent.Name, maxAgentStreamBytes)
+	}
 	output, parseErr := parseStructuredOutput(agent.Name, rawOutput)
 
 	if runErr != nil {
-		message := strings.TrimSpace(stderr.String())
+		message := trimmedLimitedOutput(stderr)
 		if message == "" && output != nil && output.AgentError != "" {
 			message = output.AgentError
 		}
@@ -240,6 +245,59 @@ func executeAgent(
 	}
 
 	return output, rawOutput, nil
+}
+
+type limitedBuffer struct {
+	buffer    bytes.Buffer
+	limit     int
+	truncated bool
+}
+
+func newLimitedBuffer(limit int) *limitedBuffer {
+	if limit < 0 {
+		limit = 0
+	}
+	return &limitedBuffer{limit: limit}
+}
+
+func (buffer *limitedBuffer) Write(data []byte) (int, error) {
+	if buffer == nil {
+		return len(data), nil
+	}
+	remaining := buffer.limit - buffer.buffer.Len()
+	if remaining > 0 {
+		if remaining > len(data) {
+			remaining = len(data)
+		}
+		_, _ = buffer.buffer.Write(data[:remaining])
+	}
+	if remaining < len(data) {
+		buffer.truncated = true
+	}
+	return len(data), nil
+}
+
+func (buffer *limitedBuffer) String() string {
+	if buffer == nil {
+		return ""
+	}
+	return buffer.buffer.String()
+}
+
+func (buffer *limitedBuffer) Truncated() bool {
+	return buffer != nil && buffer.truncated
+}
+
+func trimmedLimitedOutput(buffer *limitedBuffer) string {
+	message := strings.TrimSpace(buffer.String())
+	if !buffer.Truncated() {
+		return message
+	}
+	suffix := fmt.Sprintf("truncated after %d bytes", buffer.limit)
+	if message == "" {
+		return suffix
+	}
+	return message + " (" + suffix + ")"
 }
 
 func buildAgentCommand(

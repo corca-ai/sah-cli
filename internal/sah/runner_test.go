@@ -268,6 +268,30 @@ func TestExecuteAgentReturnsParseErrorWhenFailedAgentPrintsInvalidJSON(t *testin
 	}
 }
 
+func TestLimitedBufferCapsStoredOutput(t *testing.T) {
+	buffer := newLimitedBuffer(5)
+
+	if written, err := buffer.Write([]byte("abcdef")); err != nil || written != 6 {
+		t.Fatalf("Write returned written=%d err=%v", written, err)
+	}
+	if got := buffer.String(); got != "abcde" {
+		t.Fatalf("unexpected stored output: %q", got)
+	}
+	if !buffer.Truncated() {
+		t.Fatal("expected buffer to report truncation")
+	}
+}
+
+func TestTrimmedLimitedOutputReportsTruncation(t *testing.T) {
+	buffer := newLimitedBuffer(4)
+	_, _ = buffer.Write([]byte("  abcdef  "))
+
+	message := trimmedLimitedOutput(buffer)
+	if !strings.Contains(message, "truncated after 4 bytes") {
+		t.Fatalf("expected truncation message, got %q", message)
+	}
+}
+
 func TestResolveAssignmentAgentRequestPrefersServerOwnedRequest(t *testing.T) {
 	request, err := ResolveAssignmentAgentRequest(Assignment{
 		TaskType: "verification",
