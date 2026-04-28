@@ -129,7 +129,7 @@ func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
 		t.Fatalf("write executable: %v", err)
 	}
 
-	command, _, err := buildAgentCommand(
+	command, useStdin, err := buildAgentCommand(
 		context.Background(),
 		AgentSpec{Name: "claude", Binary: "claude"},
 		"sonnet",
@@ -140,8 +140,14 @@ func TestBuildAgentCommandForClaudeAvoidsBareAuthMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentCommand returned error: %v", err)
 	}
+	if !useStdin {
+		t.Fatal("expected claude prompt to be passed over stdin")
+	}
 
 	args := strings.Join(command.Args[1:], " ")
+	if strings.Contains(args, `{"ok":true}`) {
+		t.Fatalf("expected claude prompt to stay out of argv, got %q", args)
+	}
 	if strings.Contains(args, "--bare") {
 		t.Fatalf("expected claude args to omit --bare, got %q", args)
 	}
@@ -176,7 +182,7 @@ func TestBuildAgentCommandForGeminiDisablesExtensions(t *testing.T) {
 		t.Fatalf("write executable: %v", err)
 	}
 
-	command, _, err := buildAgentCommand(
+	command, useStdin, err := buildAgentCommand(
 		context.Background(),
 		AgentSpec{Name: "gemini", Binary: "gemini"},
 		"gemini-3-flash-base",
@@ -187,8 +193,14 @@ func TestBuildAgentCommandForGeminiDisablesExtensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentCommand returned error: %v", err)
 	}
+	if !useStdin {
+		t.Fatal("expected gemini prompt to be passed over stdin")
+	}
 
 	args := strings.Join(command.Args[1:], " ")
+	if strings.Contains(args, `{"ok":true}`) {
+		t.Fatalf("expected gemini prompt to stay out of argv, got %q", args)
+	}
 	if !strings.Contains(args, "-e none") {
 		t.Fatalf("expected gemini args to disable extensions, got %q", args)
 	}
@@ -211,11 +223,14 @@ func TestBuildAgentCommandForQwenUsesHeadlessPlanMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentCommand returned error: %v", err)
 	}
-	if useStdin {
-		t.Fatal("expected qwen prompt to be passed as an argument")
+	if !useStdin {
+		t.Fatal("expected qwen prompt to be passed over stdin")
 	}
 
 	args := strings.Join(command.Args[1:], " ")
+	if strings.Contains(args, `{"ok":true}`) {
+		t.Fatalf("expected qwen prompt to stay out of argv, got %q", args)
+	}
 	if !strings.Contains(args, "--output-format stream-json") {
 		t.Fatalf("expected qwen args to include stream-json output, got %q", args)
 	}
@@ -352,7 +367,7 @@ func TestBuildAgentCommandForClaudeIncludesJSONSchema(t *testing.T) {
 		t.Fatalf("write executable: %v", err)
 	}
 
-	command, _, err := buildAgentCommand(
+	command, useStdin, err := buildAgentCommand(
 		context.Background(),
 		AgentSpec{Name: "claude", Binary: "claude"},
 		"",
@@ -365,6 +380,9 @@ func TestBuildAgentCommandForClaudeIncludesJSONSchema(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("buildAgentCommand returned error: %v", err)
+	}
+	if !useStdin {
+		t.Fatal("expected claude prompt to be passed over stdin")
 	}
 
 	args := command.Args[1:]

@@ -203,7 +203,7 @@ func executeAgent(
 		return nil, "", err
 	}
 	if useStdin {
-		command.Stdin = strings.NewReader(request.Prompt)
+		command.Stdin = strings.NewReader(agentRequestPrompt(request))
 	}
 
 	var stdout bytes.Buffer
@@ -284,34 +284,36 @@ func agentCommandArgs(
 	request *AssignmentAgentRequest,
 	workdir string,
 ) ([]string, bool, error) {
-	prompt := ""
-	if request != nil {
-		prompt = request.Prompt
-	}
-
 	switch agent.Name {
 	case "codex":
 		return buildCodexCommandArgs(request, workdir)
 	case "gemini":
 		return []string{
-			"--prompt", prompt,
+			"--prompt", "",
 			"--sandbox", "true",
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
 			"-e", "none",
-		}, false, nil
+		}, true, nil
 	case "claude":
-		return buildClaudeCommandArgs(request, prompt)
+		return buildClaudeCommandArgs(request)
 	case "qwen":
 		return []string{
-			"--prompt", prompt,
+			"--prompt", "",
 			"--sandbox",
 			"--approval-mode", "plan",
 			"--output-format", "stream-json",
-		}, false, nil
+		}, true, nil
 	default:
 		return nil, false, fmt.Errorf("unsupported agent %q", agent.Name)
 	}
+}
+
+func agentRequestPrompt(request *AssignmentAgentRequest) string {
+	if request == nil {
+		return ""
+	}
+	return request.Prompt
 }
 
 func buildCodexCommandArgs(request *AssignmentAgentRequest, workdir string) ([]string, bool, error) {
@@ -335,7 +337,7 @@ func buildCodexCommandArgs(request *AssignmentAgentRequest, workdir string) ([]s
 	return args, true, nil
 }
 
-func buildClaudeCommandArgs(request *AssignmentAgentRequest, prompt string) ([]string, bool, error) {
+func buildClaudeCommandArgs(request *AssignmentAgentRequest) ([]string, bool, error) {
 	args := []string{
 		"-p",
 		"--verbose",
@@ -355,8 +357,7 @@ func buildClaudeCommandArgs(request *AssignmentAgentRequest, prompt string) ([]s
 		}
 		args = append(args, "--json-schema", schema)
 	}
-	args = append(args, prompt)
-	return args, false, nil
+	return args, true, nil
 }
 
 func writeOutputSchemaFile(workdir string, schema any) (string, error) {
