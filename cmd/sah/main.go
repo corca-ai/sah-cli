@@ -168,6 +168,9 @@ func parseAuthLoginFlags(args []string) (string, error) {
 	if err := fs.Parse(args); err != nil {
 		return "", handleFlagParseError(err)
 	}
+	if err := validateBaseURLFlag(*baseURL); err != nil {
+		return "", err
+	}
 	return *baseURL, nil
 }
 
@@ -310,6 +313,9 @@ func parseRunCommandOptions(args []string) (runCommandOptions, error) {
 		return runCommandOptions{}, err
 	}
 	if err := validateAgentFlags(options.Agent, options.Agents, options.RotateInstalled); err != nil {
+		return runCommandOptions{}, err
+	}
+	if err := validateBaseURLFlag(options.BaseURL); err != nil {
 		return runCommandOptions{}, err
 	}
 	return options, nil
@@ -591,6 +597,9 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	if err := validateAgentFlags(options.agent, options.agents, options.rotateInstalled); err != nil {
 		return daemonInstallOptions{}, err
 	}
+	if err := validateBaseURLFlag(options.baseURL); err != nil {
+		return daemonInstallOptions{}, err
+	}
 	return options, nil
 }
 
@@ -599,7 +608,9 @@ func applyDaemonInstallOptions(
 	options daemonInstallOptions,
 	binaryPaths map[string]string,
 ) error {
-	applyDaemonBaseURL(config, options)
+	if err := applyDaemonBaseURL(config, options); err != nil {
+		return err
+	}
 	if err := applyDaemonAgentSelection(config, options, binaryPaths); err != nil {
 		return err
 	}
@@ -609,10 +620,14 @@ func applyDaemonInstallOptions(
 	return applyDaemonTimingOptions(config, options)
 }
 
-func applyDaemonBaseURL(config *sah.Config, options daemonInstallOptions) {
+func applyDaemonBaseURL(config *sah.Config, options daemonInstallOptions) error {
 	if strings.TrimSpace(options.baseURL) != "" {
+		if err := sah.ValidateBaseURL(options.baseURL); err != nil {
+			return fmt.Errorf("--base-url: %w", err)
+		}
 		config.BaseURL = options.baseURL
 	}
+	return nil
 }
 
 func applyDaemonAgentSelection(
@@ -881,6 +896,9 @@ func meCmd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return handleFlagParseError(err)
 	}
+	if err := validateBaseURLFlag(*baseURL); err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -922,6 +940,9 @@ func contributionsCmd(args []string) error {
 	if err := validateContributionsLimit(*limit); err != nil {
 		return err
 	}
+	if err := validateBaseURLFlag(*baseURL); err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -957,14 +978,7 @@ func validateContributionsLimit(limit int) error {
 }
 
 func leaderboardCmd(args []string) error {
-	fs := flag.NewFlagSet("leaderboard", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	window := fs.String("window", "all", "all, weekly, monthly, all-time")
-	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-	if err := fs.Parse(args); err != nil {
-		return handleFlagParseError(err)
-	}
-	normalizedWindow, err := normalizeLeaderboardWindow(*window)
+	options, err := parseLeaderboardOptions(args)
 	if err != nil {
 		return err
 	}
@@ -976,8 +990,8 @@ func leaderboardCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(*baseURL) != "" {
-		config.BaseURL = *baseURL
+	if strings.TrimSpace(options.baseURL) != "" {
+		config.BaseURL = options.baseURL
 	}
 	hadAuth := config.HasAuth()
 	client := sah.NewCachedConfigClient(paths, &config)
@@ -989,7 +1003,7 @@ func leaderboardCmd(args []string) error {
 		return err
 	}
 
-	switch normalizedWindow {
+	switch options.window {
 	case "all":
 		printLeaderboardSection("Weekly", response.Weekly, leaderboardViewerEntry(response.Viewer, "weekly"))
 		fmt.Println()
@@ -1003,9 +1017,32 @@ func leaderboardCmd(args []string) error {
 	case "all-time":
 		printLeaderboardSection("All-Time", response.AllTime, leaderboardViewerEntry(response.Viewer, "all-time"))
 	default:
-		return fmt.Errorf("unsupported window %q", *window)
+		return fmt.Errorf("unsupported window %q", options.window)
 	}
 	return nil
+}
+
+type leaderboardOptions struct {
+	window  string
+	baseURL string
+}
+
+func parseLeaderboardOptions(args []string) (leaderboardOptions, error) {
+	fs := flag.NewFlagSet("leaderboard", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	window := fs.String("window", "all", "all, weekly, monthly, all-time")
+	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
+	if err := fs.Parse(args); err != nil {
+		return leaderboardOptions{}, handleFlagParseError(err)
+	}
+	normalizedWindow, err := normalizeLeaderboardWindow(*window)
+	if err != nil {
+		return leaderboardOptions{}, err
+	}
+	if err := validateBaseURLFlag(*baseURL); err != nil {
+		return leaderboardOptions{}, err
+	}
+	return leaderboardOptions{window: normalizedWindow, baseURL: *baseURL}, nil
 }
 
 func normalizeLeaderboardWindow(raw string) (string, error) {
@@ -1252,6 +1289,16 @@ func validateAgentsFlag(raw string, specified bool) error {
 	}
 	if len(sah.ParseAgentList(raw)) == 0 {
 		return fmt.Errorf("--agents must include at least one agent")
+	}
+	return nil
+}
+
+func validateBaseURLFlag(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if err := sah.ValidateBaseURL(raw); err != nil {
+		return fmt.Errorf("--base-url: %w", err)
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -145,11 +146,18 @@ func LoadConfig(paths Paths) (Config, error) {
 	if err := json.Unmarshal(data, &config); err != nil {
 		return Config{}, fmt.Errorf("decode config: %w", err)
 	}
-	return normalizeConfig(config), nil
+	config = normalizeConfig(config)
+	if err := ValidateBaseURL(config.BaseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid base_url in config: %w", err)
+	}
+	return config, nil
 }
 
 func SaveConfig(paths Paths, config Config) error {
 	config = normalizeConfig(config)
+	if err := ValidateBaseURL(config.BaseURL); err != nil {
+		return fmt.Errorf("invalid base_url: %w", err)
+	}
 	if err := os.MkdirAll(paths.ConfigDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
 	}
@@ -227,6 +235,30 @@ func normalizeConfig(config Config) Config {
 
 func normalizeBaseURL(raw string) string {
 	return strings.TrimRight(strings.TrimSpace(raw), "/")
+}
+
+func ValidateBaseURL(raw string) error {
+	value := normalizeBaseURL(raw)
+	if value == "" {
+		return fmt.Errorf("base URL must not be empty")
+	}
+
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return fmt.Errorf("parse base URL: %w", err)
+	}
+	switch strings.ToLower(strings.TrimSpace(parsed.Scheme)) {
+	case "http", "https":
+	default:
+		return fmt.Errorf("base URL must use http or https")
+	}
+	if strings.TrimSpace(parsed.Host) == "" {
+		return fmt.Errorf("base URL must include a host")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("base URL must not include user info")
+	}
+	return nil
 }
 
 func (config Config) HasAuth() bool {

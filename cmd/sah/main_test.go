@@ -294,6 +294,29 @@ func TestApplyDaemonInstallOptionsRejectsEmptyAgentList(t *testing.T) {
 	}
 }
 
+func TestParseCommandOptionsRejectInvalidBaseURL(t *testing.T) {
+	if _, err := parseAuthLoginFlags([]string{"--base-url", "localhost:8000"}); err == nil {
+		t.Fatal("expected auth login to reject invalid base URL")
+	}
+	if _, err := parseRunCommandOptions([]string{"--base-url", "localhost:8000"}); err == nil {
+		t.Fatal("expected run to reject invalid base URL")
+	}
+	if _, err := parseDaemonInstallOptions([]string{"--base-url", "localhost:8000"}); err == nil {
+		t.Fatal("expected daemon install to reject invalid base URL")
+	}
+}
+
+func TestApplyDaemonInstallOptionsRejectsInvalidBaseURL(t *testing.T) {
+	config := sah.DefaultConfig()
+	err := applyDaemonInstallOptions(&config, daemonInstallOptions{baseURL: "localhost:8000"}, nil)
+	if err == nil {
+		t.Fatal("expected invalid daemon base URL to be rejected")
+	}
+	if config.BaseURL != sah.DefaultBaseURL {
+		t.Fatalf("expected base URL to remain unchanged, got %q", config.BaseURL)
+	}
+}
+
 func TestParseAuthLoginFlagsAcceptsDeprecatedNoOpen(t *testing.T) {
 	baseURL, err := parseAuthLoginFlags([]string{"--base-url", "http://localhost:8000", "--no-open"})
 	if err != nil {

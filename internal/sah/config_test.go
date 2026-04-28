@@ -1,6 +1,8 @@
 package sah
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -70,5 +72,60 @@ func TestConfigParsedTokenExpiry(t *testing.T) {
 	got := Config{TokenExpiry: expiry.Format(time.RFC3339)}.ParsedTokenExpiry()
 	if !got.Equal(expiry) {
 		t.Fatalf("unexpected token expiry: %v", got)
+	}
+}
+
+func TestValidateBaseURL(t *testing.T) {
+	for _, value := range []string{
+		DefaultBaseURL,
+		"http://localhost:8000",
+		" https://sah.example/ ",
+	} {
+		if err := ValidateBaseURL(value); err != nil {
+			t.Fatalf("expected base URL %q to be valid, got %v", value, err)
+		}
+	}
+
+	for _, value := range []string{
+		"",
+		"localhost:8000",
+		"ftp://sah.example",
+		"https:///sah",
+		"https://user:pass@sah.example",
+	} {
+		if err := ValidateBaseURL(value); err == nil {
+			t.Fatalf("expected base URL %q to be rejected", value)
+		}
+	}
+}
+
+func TestLoadConfigRejectsInvalidBaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	paths := Paths{
+		ConfigDir:  configDir,
+		ConfigFile: filepath.Join(configDir, "config.json"),
+	}
+	if err := os.WriteFile(paths.ConfigFile, []byte(`{"base_url":"localhost:8000"}`), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	if _, err := LoadConfig(paths); err == nil {
+		t.Fatal("expected invalid stored base_url to be rejected")
+	}
+}
+
+func TestSaveConfigRejectsInvalidBaseURL(t *testing.T) {
+	configDir := t.TempDir()
+	paths := Paths{
+		ConfigDir:  configDir,
+		ConfigFile: filepath.Join(configDir, "config.json"),
+	}
+
+	err := SaveConfig(paths, Config{BaseURL: "localhost:8000"})
+	if err == nil {
+		t.Fatal("expected invalid base_url to be rejected")
+	}
+	if _, statErr := os.Stat(paths.ConfigFile); !os.IsNotExist(statErr) {
+		t.Fatalf("expected invalid config not to be written, got stat err=%v", statErr)
 	}
 }
