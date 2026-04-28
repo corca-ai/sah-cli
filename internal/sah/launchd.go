@@ -215,8 +215,15 @@ func StartLaunchAgent() error {
 }
 
 func StopLaunchAgent() error {
-	_, err := runLaunchctl("bootout", launchdDomain()+"/"+DefaultLaunchdLabel)
+	return stopLaunchAgentWithRunner(runLaunchctl)
+}
+
+func stopLaunchAgentWithRunner(runner func(args ...string) (string, error)) error {
+	_, err := runner("bootout", launchdDomain()+"/"+DefaultLaunchdLabel)
 	if err != nil {
+		if isLaunchAgentNotLoadedError(err) {
+			return nil
+		}
 		return fmt.Errorf("stop launch agent: %w", err)
 	}
 	return nil

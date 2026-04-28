@@ -76,6 +76,27 @@ func TestLaunchAgentStatusWithRunnerTreatsMissingServiceAsNotLoaded(t *testing.T
 	}
 }
 
+func TestStopLaunchAgentWithRunnerTreatsMissingServiceAsStopped(t *testing.T) {
+	err := stopLaunchAgentWithRunner(func(args ...string) (string, error) {
+		if len(args) == 0 || args[0] != "bootout" {
+			t.Fatalf("expected bootout command, got %#v", args)
+		}
+		return "", fmt.Errorf("exit status 113: Could not find service")
+	})
+	if err != nil {
+		t.Fatalf("stopLaunchAgentWithRunner returned error: %v", err)
+	}
+}
+
+func TestStopLaunchAgentWithRunnerReturnsUnexpectedError(t *testing.T) {
+	err := stopLaunchAgentWithRunner(func(args ...string) (string, error) {
+		return "", fmt.Errorf("exit status 3: permission denied")
+	})
+	if err == nil {
+		t.Fatal("expected unexpected launchctl error to be returned")
+	}
+}
+
 func TestIsRetryableBootstrapError(t *testing.T) {
 	if !isRetryableBootstrapError(fmt.Errorf("exit status 5: Bootstrap failed: 5: Input/output error")) {
 		t.Fatal("expected input/output bootstrap error to be retryable")
