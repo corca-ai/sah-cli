@@ -12,10 +12,9 @@ import (
 const defaultOAuthScope = "user:api offline_access"
 
 type LoginOptions struct {
-	BaseURL     string
-	Paths       Paths
-	Output      io.Writer
-	OpenBrowser bool
+	BaseURL string
+	Paths   Paths
+	Output  io.Writer
 }
 
 func Login(ctx context.Context, options LoginOptions) (*OAuthTokenResponse, error) {

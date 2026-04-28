@@ -137,7 +137,7 @@ func authCmd(args []string) error {
 }
 
 func runAuthLogin(args []string) error {
-	baseURL, noOpen, err := parseAuthLoginFlags(args)
+	baseURL, err := parseAuthLoginFlags(args)
 	if err != nil {
 		return err
 	}
@@ -152,22 +152,22 @@ func runAuthLogin(args []string) error {
 	if strings.TrimSpace(baseURL) != "" {
 		config.BaseURL = baseURL
 	}
-	if err := loginAndPersist(ctx, paths, &config, !noOpen); err != nil {
+	if err := loginAndPersist(ctx, paths, &config); err != nil {
 		return err
 	}
 	printAuthLoginSuccess(ctx, paths, config)
 	return nil
 }
 
-func parseAuthLoginFlags(args []string) (string, bool, error) {
+func parseAuthLoginFlags(args []string) (string, error) {
 	fs := flag.NewFlagSet("auth login", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	baseURL := fs.String("base-url", "", "SCIENCE@home base URL")
-	noOpen := fs.Bool("no-open", false, "Deprecated compatibility flag; sah now always prints the verification URL")
+	fs.Bool("no-open", false, "Deprecated compatibility flag; sah always prints the verification URL")
 	if err := fs.Parse(args); err != nil {
-		return "", false, handleFlagParseError(err)
+		return "", handleFlagParseError(err)
 	}
-	return *baseURL, *noOpen, nil
+	return *baseURL, nil
 }
 
 func printAuthLoginSuccess(ctx context.Context, paths sah.Paths, config sah.Config) {
@@ -387,7 +387,7 @@ func ensureRunAuthentication(
 	if daemonMode {
 		return report(fmt.Errorf("daemon mode requires an existing credential; run `sah auth login` first"))
 	}
-	return loginAndPersist(ctx, paths, config, true)
+	return loginAndPersist(ctx, paths, config)
 }
 
 func buildRunWorkerSession(
@@ -529,7 +529,7 @@ func daemonInstallCmd(args []string) error {
 	}
 
 	if !config.HasAuth() {
-		if err := loginAndPersist(ctx, paths, &config, true); err != nil {
+		if err := loginAndPersist(ctx, paths, &config); err != nil {
 			return err
 		}
 	} else if err := sah.SaveConfig(paths, config); err != nil {
@@ -1011,13 +1011,11 @@ func loginAndPersist(
 	ctx context.Context,
 	paths sah.Paths,
 	config *sah.Config,
-	openBrowser bool,
 ) error {
 	response, err := sah.Login(ctx, sah.LoginOptions{
-		BaseURL:     config.BaseURL,
-		Paths:       paths,
-		Output:      os.Stdout,
-		OpenBrowser: openBrowser,
+		BaseURL: config.BaseURL,
+		Paths:   paths,
+		Output:  os.Stdout,
 	})
 	if err != nil {
 		return err

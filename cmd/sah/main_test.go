@@ -261,6 +261,16 @@ func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *te
 	}
 }
 
+func TestParseAuthLoginFlagsAcceptsDeprecatedNoOpen(t *testing.T) {
+	baseURL, err := parseAuthLoginFlags([]string{"--base-url", "http://localhost:8000", "--no-open"})
+	if err != nil {
+		t.Fatalf("parseAuthLoginFlags returned error: %v", err)
+	}
+	if baseURL != "http://localhost:8000" {
+		t.Fatalf("unexpected base url: %q", baseURL)
+	}
+}
+
 func TestLeaderboardDisplayEntriesKeepsTop15AndAppendsViewer(t *testing.T) {
 	entries := make([]sah.LeaderboardEntry, 0, 20)
 	for index := range 20 {
