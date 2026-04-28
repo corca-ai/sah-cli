@@ -1083,7 +1083,7 @@ type parsedLink struct {
 }
 
 func parseLinkHeader(raw string) []parsedLink {
-	parts := strings.Split(raw, ",")
+	parts := splitLinkHeaderSegments(raw, ',')
 	links := make([]parsedLink, 0, len(parts))
 	for _, part := range parts {
 		segment := strings.TrimSpace(part)
@@ -1101,7 +1101,7 @@ func parseLinkHeader(raw string) []parsedLink {
 		}
 
 		var rel string
-		for _, param := range strings.Split(segment[end+1:], ";") {
+		for _, param := range splitLinkHeaderSegments(segment[end+1:], ';') {
 			key, value, ok := strings.Cut(strings.TrimSpace(param), "=")
 			if !ok || !strings.EqualFold(strings.TrimSpace(key), "rel") {
 				continue
@@ -1122,6 +1122,47 @@ func parseLinkHeader(raw string) []parsedLink {
 		links = append(links, parsedLink{rel: rel, href: href})
 	}
 	return links
+}
+
+func splitLinkHeaderSegments(raw string, delimiter byte) []string {
+	segments := []string{}
+	start := 0
+	inQuote := false
+	inAngle := false
+	escaped := false
+
+	for index := range len(raw) {
+		character := raw[index]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if inQuote && character == '\\' {
+			escaped = true
+			continue
+		}
+
+		switch character {
+		case '"':
+			if !inAngle {
+				inQuote = !inQuote
+			}
+		case '<':
+			if !inQuote {
+				inAngle = true
+			}
+		case '>':
+			if !inQuote {
+				inAngle = false
+			}
+		case delimiter:
+			if !inQuote && !inAngle {
+				segments = append(segments, raw[start:index])
+				start = index + 1
+			}
+		}
+	}
+	return append(segments, raw[start:])
 }
 
 func linkMethodOrDefault(method string, fallback string) string {

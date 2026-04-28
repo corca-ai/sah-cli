@@ -317,6 +317,40 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 	}
 }
 
+func TestParseLinkHeaderKeepsCommaInsideURI(t *testing.T) {
+	t.Parallel()
+
+	links := parseLinkHeader(
+		`</s@h/assignments/41/submission?fields=payload,score>; rel="submit", </s@h/assignments/41>; rel="release"`,
+	)
+	if len(links) != 2 {
+		t.Fatalf("expected two links, got %#v", links)
+	}
+	if links[0].rel != "submit" || links[0].href != "/s@h/assignments/41/submission?fields=payload,score" {
+		t.Fatalf("unexpected submit link: %#v", links[0])
+	}
+	if links[1].rel != "release" || links[1].href != "/s@h/assignments/41" {
+		t.Fatalf("unexpected release link: %#v", links[1])
+	}
+}
+
+func TestParseLinkHeaderKeepsCommaInsideQuotedParameter(t *testing.T) {
+	t.Parallel()
+
+	links := parseLinkHeader(
+		`</s@h/assignments/41/submission>; title="Submit, with notes"; rel="submit", </s@h/assignments/41>; rel="release"`,
+	)
+	if len(links) != 2 {
+		t.Fatalf("expected two links, got %#v", links)
+	}
+	if links[0].rel != "submit" || links[0].href != "/s@h/assignments/41/submission" {
+		t.Fatalf("unexpected submit link: %#v", links[0])
+	}
+	if links[1].rel != "release" || links[1].href != "/s@h/assignments/41" {
+		t.Fatalf("unexpected release link: %#v", links[1])
+	}
+}
+
 func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 	t.Parallel()
 
