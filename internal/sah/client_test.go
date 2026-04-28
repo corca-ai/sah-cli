@@ -374,6 +374,39 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 	}
 }
 
+func TestSubmitAssignmentRejectsCrossOriginAssignmentLink(t *testing.T) {
+	t.Parallel()
+
+	var externalCalls atomic.Int32
+	externalServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		externalCalls.Add(1)
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = writer.Write([]byte(`{"assignment_id":41,"contribution_id":99}`))
+	}))
+	defer externalServer.Close()
+
+	client := NewClient("https://sah.example", "test-key")
+	_, err := client.SubmitAssignment(
+		context.Background(),
+		Assignment{
+			AssignmentID: 41,
+			TaskType:     "novel-task",
+			Links: AssignmentLinks{
+				Submit: AssignmentLink{
+					Href: externalServer.URL + "/s@h/assignments/41/submission",
+				},
+			},
+		},
+		map[string]any{"answer": "ok"},
+	)
+	if err == nil {
+		t.Fatal("expected cross-origin assignment link to be rejected")
+	}
+	if got := externalCalls.Load(); got != 0 {
+		t.Fatalf("expected external assignment link not to be requested, got %d calls", got)
+	}
+}
+
 func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 	t.Parallel()
 
@@ -403,6 +436,36 @@ func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("ReleaseOpenAssignment returned error: %v", err)
+	}
+}
+
+func TestReleaseOpenAssignmentRejectsCrossOriginAssignmentLink(t *testing.T) {
+	t.Parallel()
+
+	var externalCalls atomic.Int32
+	externalServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		externalCalls.Add(1)
+		writer.WriteHeader(http.StatusNoContent)
+	}))
+	defer externalServer.Close()
+
+	client := NewClient("https://sah.example", "test-key")
+	err := client.ReleaseOpenAssignment(
+		context.Background(),
+		Assignment{
+			AssignmentID: 41,
+			Links: AssignmentLinks{
+				Release: AssignmentLink{
+					Href: externalServer.URL + "/s@h/assignments/41",
+				},
+			},
+		},
+	)
+	if err == nil {
+		t.Fatal("expected cross-origin assignment link to be rejected")
+	}
+	if got := externalCalls.Load(); got != 0 {
+		t.Fatalf("expected external assignment link not to be requested, got %d calls", got)
 	}
 }
 

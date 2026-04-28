@@ -177,6 +177,10 @@ func (client *Client) SubmitAssignment(
 	payload map[string]any,
 ) (*SubmitContributionResponse, error) {
 	if href := strings.TrimSpace(assignment.Links.Submit.Href); href != "" {
+		endpoint, err := client.resolveTrustedAssignmentLink(href)
+		if err != nil {
+			return nil, err
+		}
 		// Assignment-scoped submission already identifies the task on the server,
 		// so newer protocol versions only need the payload object here.
 		request := map[string]any{
@@ -186,7 +190,7 @@ func (client *Client) SubmitAssignment(
 		if err := client.doWorkerJSON(
 			ctx,
 			linkMethodOrDefault(assignment.Links.Submit.Method, http.MethodPost),
-			href,
+			endpoint,
 			request,
 			&response,
 		); err != nil {
@@ -208,10 +212,14 @@ func (client *Client) ReleaseAssignment(ctx context.Context, assignmentID int64)
 
 func (client *Client) ReleaseOpenAssignment(ctx context.Context, assignment Assignment) error {
 	if href := strings.TrimSpace(assignment.Links.Release.Href); href != "" {
+		endpoint, err := client.resolveTrustedAssignmentLink(href)
+		if err != nil {
+			return err
+		}
 		return client.doWorkerJSON(
 			ctx,
 			linkMethodOrDefault(assignment.Links.Release.Method, http.MethodPost),
-			href,
+			endpoint,
 			nil,
 			nil,
 		)
@@ -1014,6 +1022,36 @@ func (client *Client) resolveEndpoint(path string) (*url.URL, error) {
 		return nil, err
 	}
 	return baseURL.ResolveReference(ref), nil
+}
+
+func (client *Client) resolveTrustedAssignmentLink(href string) (string, error) {
+	baseURL, err := url.Parse(client.baseURL)
+	if err != nil {
+		return "", err
+	}
+	endpoint, err := client.resolveEndpoint(href)
+	if err != nil {
+		return "", fmt.Errorf("build assignment link url: %w", err)
+	}
+	if !sameHTTPOrigin(endpoint, baseURL) {
+		return "", fmt.Errorf("untrusted assignment link %q: origin must match %s", href, httpURLOrigin(baseURL))
+	}
+	return endpoint.String(), nil
+}
+
+func sameHTTPOrigin(a *url.URL, b *url.URL) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	if !strings.EqualFold(a.Scheme, b.Scheme) || !strings.EqualFold(a.Host, b.Host) {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(a.Scheme)) {
+	case "http", "https":
+		return true
+	default:
+		return false
+	}
 }
 
 func mergeAssignmentLinks(assignment *Assignment, headers http.Header) {
