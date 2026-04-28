@@ -538,21 +538,18 @@ func (client *Client) doJSONWithHeaders(
 		if err != nil {
 			return nil, fmt.Errorf("perform request: %w", err)
 		}
-	} else {
-		retriedResponse, retried, err := client.retryWithAPIKeyFallback(
-			ctx,
-			request,
-			response,
-			method,
-			path,
-			body,
-			options,
+		response, err = client.retryRejectedBearerWithAPIKey(
+			ctx, retryRequest, response, method, path, body, options,
 		)
 		if err != nil {
 			return nil, err
 		}
-		if retried {
-			response = retriedResponse
+	} else {
+		response, err = client.retryRejectedBearerWithAPIKey(
+			ctx, request, response, method, path, body, options,
+		)
+		if err != nil {
+			return nil, err
 		}
 	}
 	defer func() {
@@ -564,6 +561,33 @@ func (client *Client) doJSONWithHeaders(
 		return nil, decodeStatusError(response)
 	}
 	return headers, decodeJSONResponse(response, out)
+}
+
+func (client *Client) retryRejectedBearerWithAPIKey(
+	ctx context.Context,
+	request *http.Request,
+	response *http.Response,
+	method string,
+	path string,
+	body any,
+	options requestOptions,
+) (*http.Response, error) {
+	retriedResponse, retried, err := client.retryWithAPIKeyFallback(
+		ctx,
+		request,
+		response,
+		method,
+		path,
+		body,
+		options,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if retried {
+		return retriedResponse, nil
+	}
+	return response, nil
 }
 
 func (client *Client) retryWithAPIKeyFallback(

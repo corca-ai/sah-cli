@@ -1146,3 +1146,111 @@ func TestConfigClientFallsBackToAPIKeyWhenStoredBearerTokenIsRejectedWithoutRefr
 		t.Fatalf("expected rejected bearer tokens to be cleared, got %#v", config)
 	}
 }
+
+func newRefreshedBearerRejectedFallbackTestServer(
+	t *testing.T,
+	meCalls *atomic.Int32,
+	tokenCalls *atomic.Int32,
+) *httptest.Server {
+	t.Helper()
+
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_, _ = fmt.Fprintf(writer, `{
+				"issuer": %q,
+				"device_authorization_endpoint": %q,
+				"token_endpoint": %q
+			}`, server.URL, server.URL+"/oauth/device_authorization", server.URL+"/oauth/token")
+		case "/oauth/token":
+			tokenCalls.Add(1)
+			assertRequestOrigin(t, request, server.URL)
+			if err := request.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := request.PostForm.Get("refresh_token"); got != "refresh-token" {
+				t.Fatalf("unexpected refresh token: %q", got)
+			}
+			_, _ = writer.Write([]byte(`{
+				"access_token": "fresh-access-token",
+				"token_type": "Bearer",
+				"expires_in": 3600,
+				"refresh_token": "fresh-refresh-token"
+			}`))
+		case "/s@h/me":
+			handleRefreshedBearerRejectedFallbackMe(t, writer, request, meCalls.Add(1))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	return server
+}
+
+func handleRefreshedBearerRejectedFallbackMe(
+	t *testing.T,
+	writer http.ResponseWriter,
+	request *http.Request,
+	call int32,
+) {
+	t.Helper()
+
+	switch call {
+	case 1:
+		if got := request.Header.Get("Authorization"); got != "Bearer stale-access-token" {
+			t.Fatalf("expected stale bearer token on first request, got %q", got)
+		}
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"detail":"Expired service token"}`))
+	case 2:
+		if got := request.Header.Get("Authorization"); got != "Bearer fresh-access-token" {
+			t.Fatalf("expected refreshed bearer token on retry, got %q", got)
+		}
+		writer.WriteHeader(http.StatusForbidden)
+		_, _ = writer.Write([]byte(`{"detail":"Token not allowed"}`))
+	case 3:
+		if got := request.Header.Get("Authorization"); got != "" {
+			t.Fatalf("expected authorization header to be cleared after refreshed bearer rejection, got %q", got)
+		}
+		if got := request.Header.Get("X-API-Key"); got != "legacy-api-key" {
+			t.Fatalf("expected api key fallback, got %q", got)
+		}
+		writeTestMeResponse(writer)
+	default:
+		t.Fatalf("unexpected me call %d", call)
+	}
+}
+
+func TestConfigClientFallsBackToAPIKeyWhenRefreshedBearerTokenIsRejected(t *testing.T) {
+	t.Parallel()
+
+	var meCalls atomic.Int32
+	var tokenCalls atomic.Int32
+	server := newRefreshedBearerRejectedFallbackTestServer(t, &meCalls, &tokenCalls)
+	defer server.Close()
+
+	paths := resolvePaths("darwin", t.TempDir(), "/Users/tester", func(string) string { return "" })
+	config := Config{
+		BaseURL:       server.URL,
+		APIKey:        "legacy-api-key",
+		AccessToken:   "stale-access-token",
+		RefreshToken:  "refresh-token",
+		TokenType:     "Bearer",
+		TokenExpiry:   time.Now().Add(time.Hour).Format(time.RFC3339),
+		OAuthClientID: DefaultOAuthClientID,
+	}
+	client := NewConfigClient(paths, &config)
+	if _, err := client.GetMe(context.Background()); err != nil {
+		t.Fatalf("GetMe returned error: %v", err)
+	}
+	if got := tokenCalls.Load(); got != 1 {
+		t.Fatalf("expected one refresh attempt, got %d", got)
+	}
+	if got := meCalls.Load(); got != 3 {
+		t.Fatalf("expected stale bearer, refreshed bearer, and api key fallback requests, got %d", got)
+	}
+	if config.AccessToken != "" || config.RefreshToken != "" || config.TokenType != "" || config.TokenExpiry != "" {
+		t.Fatalf("expected rejected refreshed bearer tokens to be cleared, got %#v", config)
+	}
+}
