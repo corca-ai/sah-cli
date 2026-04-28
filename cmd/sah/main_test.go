@@ -335,6 +335,17 @@ func TestLeaderboardDisplayEntriesDoesNotDuplicateViewerInTopRows(t *testing.T) 
 	}
 }
 
+func TestNormalizeLeaderboardWindow(t *testing.T) {
+	for _, value := range []string{"all", "weekly", "monthly", "all-time", " Weekly "} {
+		if _, err := normalizeLeaderboardWindow(value); err != nil {
+			t.Fatalf("expected window %q to be valid, got %v", value, err)
+		}
+	}
+	if _, err := normalizeLeaderboardWindow("daily"); err == nil {
+		t.Fatal("expected unsupported window to be rejected")
+	}
+}
+
 func TestLeaderboardCmdUsesAPIKeyAndShowsViewerRank(t *testing.T) {
 	homeDir := t.TempDir()
 	configDir := filepath.Join(homeDir, ".config")

@@ -948,6 +948,10 @@ func leaderboardCmd(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return handleFlagParseError(err)
 	}
+	normalizedWindow, err := normalizeLeaderboardWindow(*window)
+	if err != nil {
+		return err
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -969,7 +973,7 @@ func leaderboardCmd(args []string) error {
 		return err
 	}
 
-	switch strings.ToLower(strings.TrimSpace(*window)) {
+	switch normalizedWindow {
 	case "all":
 		printLeaderboardSection("Weekly", response.Weekly, leaderboardViewerEntry(response.Viewer, "weekly"))
 		fmt.Println()
@@ -986,6 +990,16 @@ func leaderboardCmd(args []string) error {
 		return fmt.Errorf("unsupported window %q", *window)
 	}
 	return nil
+}
+
+func normalizeLeaderboardWindow(raw string) (string, error) {
+	window := strings.ToLower(strings.TrimSpace(raw))
+	switch window {
+	case "all", "weekly", "monthly", "all-time":
+		return window, nil
+	default:
+		return "", fmt.Errorf("unsupported window %q", raw)
+	}
 }
 
 func agentsCmd(args []string) error {
