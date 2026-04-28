@@ -375,6 +375,12 @@ func TestCanonicalCommandKey(t *testing.T) {
 	}
 }
 
+func TestVersionCommandDoesNotPrintSuccessHints(t *testing.T) {
+	if shouldPrintCommandSuccessHints("version") {
+		t.Fatal("expected version command to suppress success hints")
+	}
+}
+
 func TestPrintStateSummaryIncludesUpdateLine(t *testing.T) {
 	state := cliState{
 		BaseURL: "https://sah.borca.ai",

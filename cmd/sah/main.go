@@ -56,7 +56,7 @@ func main() {
 	sah.SetCLIVersion(version)
 	commandKey, err := runCLI(os.Args[1:])
 	if err == nil {
-		if commandKey != "" {
+		if shouldPrintCommandSuccessHints(commandKey) {
 			printCommandSuccessHints(os.Stdout, inspectCLIState(), commandKey)
 		}
 		return
@@ -71,17 +71,19 @@ func main() {
 }
 
 func runCLI(args []string) (string, error) {
-	state := inspectCLIState()
 	if len(args) == 0 {
-		printEntryExperience(os.Stdout, state)
+		printEntryExperience(os.Stdout, inspectCLIState())
 		return "", nil
 	}
 	if isHelpToken(args[0]) {
-		printHelp(os.Stdout, strings.Join(args[1:], " "), state)
+		printHelp(os.Stdout, strings.Join(args[1:], " "), inspectCLIState())
 		return "", nil
 	}
 
 	commandKey := canonicalCommandKey(args)
+	if commandKey == "version" {
+		return commandKey, executeTopLevelCommand(args)
+	}
 	if requiresSupportedWorkerContract(commandKey) {
 		if err := enforceSupportedWorkerContract(); err != nil {
 			return commandKey, err

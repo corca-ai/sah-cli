@@ -342,6 +342,15 @@ func printCommandSuccessHints(writer io.Writer, state cliState, commandKey strin
 	printSuggestionSection(writer, "Next commands", resolveNavigationSuggestions(state, commandKey, nil))
 }
 
+func shouldPrintCommandSuccessHints(commandKey string) bool {
+	switch strings.TrimSpace(commandKey) {
+	case "", "version":
+		return false
+	default:
+		return true
+	}
+}
+
 func printStateSummary(writer io.Writer, state cliState) {
 	if writer == nil {
 		return
