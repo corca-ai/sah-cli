@@ -586,11 +586,8 @@ func (client *Client) retryWithAPIKeyFallback(
 	}
 
 	_ = response.Body.Close()
-	client.clearOAuthTokens()
-	if client.saveTokens != nil {
-		if err := client.saveTokens("", "", "", time.Time{}); err != nil {
-			return nil, false, err
-		}
+	if err := client.clearAndSaveOAuthTokens(); err != nil {
+		return nil, false, err
 	}
 
 	retryRequest, err := client.newJSONRequest(ctx, method, path, body, options)
@@ -790,6 +787,14 @@ func (client *Client) clearOAuthTokens() {
 	client.tokenExpiry = time.Time{}
 }
 
+func (client *Client) clearAndSaveOAuthTokens() error {
+	client.clearOAuthTokens()
+	if client.saveTokens == nil {
+		return nil
+	}
+	return client.saveTokens("", "", "", time.Time{})
+}
+
 func (client *Client) getOAuthAuthorizationServerMetadata(
 	ctx context.Context,
 ) (*OAuthAuthorizationServerMetadata, error) {
@@ -832,14 +837,13 @@ func (client *Client) ensureAccessToken(ctx context.Context, force bool) error {
 	}
 	response, err := refreshOAuthTokenWithClient(ctx, client, clientID, client.refreshToken)
 	if err != nil {
-		if client.apiKey != "" && IsAuthenticationFailure(err) {
-			client.clearOAuthTokens()
-			if client.saveTokens != nil {
-				if saveErr := client.saveTokens("", "", "", time.Time{}); saveErr != nil {
-					return saveErr
-				}
+		if IsAuthenticationFailure(err) {
+			if saveErr := client.clearAndSaveOAuthTokens(); saveErr != nil {
+				return saveErr
 			}
-			return nil
+			if client.apiKey != "" {
+				return nil
+			}
 		}
 		return err
 	}

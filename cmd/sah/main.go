@@ -959,9 +959,10 @@ func leaderboardCmd(args []string) error {
 	if strings.TrimSpace(*baseURL) != "" {
 		config.BaseURL = *baseURL
 	}
+	hadAuth := config.HasAuth()
 	client := sah.NewCachedConfigClient(paths, &config)
 	response, err := client.GetLeaderboard(ctx)
-	if err != nil && config.HasAuth() && sah.IsAuthenticationFailure(err) {
+	if err != nil && hadAuth && sah.IsAuthenticationFailure(err) {
 		response, err = sah.NewCachedClient(paths, config.BaseURL, "").GetLeaderboard(ctx)
 	}
 	if err != nil {

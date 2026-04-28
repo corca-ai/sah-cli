@@ -1040,6 +1040,60 @@ func TestConfigClientFallsBackToAPIKeyWhenRefreshTokenIsRejected(t *testing.T) {
 	}
 }
 
+func TestConfigClientClearsOAuthTokensWhenRefreshTokenIsRejectedWithoutAPIKey(t *testing.T) {
+	t.Parallel()
+
+	var tokenCalls atomic.Int32
+	var server *httptest.Server
+	server = httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		switch request.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_, _ = fmt.Fprintf(writer, `{
+				"issuer": %q,
+				"device_authorization_endpoint": %q,
+				"token_endpoint": %q
+			}`, server.URL, server.URL+"/oauth/device_authorization", server.URL+"/oauth/token")
+		case "/oauth/token":
+			tokenCalls.Add(1)
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"error":"invalid_grant","error_description":"Refresh token is invalid"}`))
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	paths := resolvePaths("darwin", t.TempDir(), "/Users/tester", func(string) string { return "" })
+	config := Config{
+		BaseURL:       server.URL,
+		AccessToken:   "expired-access-token",
+		RefreshToken:  "refresh-token",
+		TokenType:     "Bearer",
+		TokenExpiry:   time.Now().Add(-time.Minute).Format(time.RFC3339),
+		OAuthClientID: DefaultOAuthClientID,
+	}
+	client := NewConfigClient(paths, &config)
+	_, err := client.GetMe(context.Background())
+	if !IsAuthenticationFailure(err) {
+		t.Fatalf("expected authentication failure, got %v", err)
+	}
+	if got := tokenCalls.Load(); got != 1 {
+		t.Fatalf("expected one refresh attempt, got %d", got)
+	}
+	if config.AccessToken != "" || config.RefreshToken != "" || config.TokenType != "" || config.TokenExpiry != "" {
+		t.Fatalf("expected rejected oauth tokens to be cleared, got %#v", config)
+	}
+
+	saved, err := LoadConfig(paths)
+	if err != nil {
+		t.Fatalf("LoadConfig returned error: %v", err)
+	}
+	if saved.AccessToken != "" || saved.RefreshToken != "" || saved.TokenType != "" || saved.TokenExpiry != "" {
+		t.Fatalf("expected saved oauth tokens to be cleared, got %#v", saved)
+	}
+}
+
 func TestConfigClientFallsBackToAPIKeyWhenStoredBearerTokenIsRejectedWithoutRefreshToken(t *testing.T) {
 	t.Parallel()
 
