@@ -16,6 +16,21 @@ import (
 	"github.com/corca-ai/sah-cli/internal/sah"
 )
 
+func writeTestMeResponse(writer http.ResponseWriter) {
+	writer.Header().Set("Content-Type", "application/json")
+	_, _ = writer.Write([]byte(`{
+		"id": 1,
+		"email": "ada@example.com",
+		"name": "Ada",
+		"credits": 10,
+		"leaderboard_score": 10,
+		"trust": 1.0,
+		"created_at": "2026-04-14T00:00:00Z",
+		"rank": 1,
+		"pending_credits": 0
+	}`))
+}
+
 func newInvalidRefreshTokenServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -314,6 +329,63 @@ func TestApplyDaemonInstallOptionsRejectsInvalidBaseURL(t *testing.T) {
 	}
 	if config.BaseURL != sah.DefaultBaseURL {
 		t.Fatalf("expected base URL to remain unchanged, got %q", config.BaseURL)
+	}
+}
+
+func TestEnsureDaemonInstallAuthenticationRequiresCredential(t *testing.T) {
+	config := sah.DefaultConfig()
+
+	err := ensureDaemonInstallAuthentication(context.Background(), sah.Paths{}, &config)
+	if err == nil {
+		t.Fatal("expected missing credential to be rejected")
+	}
+	if !strings.Contains(err.Error(), "sah auth login") {
+		t.Fatalf("expected login guidance, got %v", err)
+	}
+}
+
+func TestEnsureDaemonInstallAuthenticationRejectsStoredCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/s@h/me" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		writer.Header().Set("Content-Type", "application/json")
+		writer.WriteHeader(http.StatusUnauthorized)
+		_, _ = writer.Write([]byte(`{"detail":"Invalid API key"}`))
+	}))
+	defer server.Close()
+
+	config := sah.Config{
+		BaseURL: server.URL,
+		APIKey:  "stale-key",
+	}
+	err := ensureDaemonInstallAuthentication(context.Background(), sah.Paths{}, &config)
+	if err == nil {
+		t.Fatal("expected rejected credential to fail daemon install")
+	}
+	if !strings.Contains(err.Error(), "sah auth login") {
+		t.Fatalf("expected relogin guidance, got %v", err)
+	}
+}
+
+func TestEnsureDaemonInstallAuthenticationAcceptsStoredCredential(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/s@h/me" {
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+		}
+		if got := request.Header.Get("X-API-Key"); got != "test-key" {
+			t.Fatalf("unexpected api key header: %q", got)
+		}
+		writeTestMeResponse(writer)
+	}))
+	defer server.Close()
+
+	config := sah.Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+	}
+	if err := ensureDaemonInstallAuthentication(context.Background(), sah.Paths{}, &config); err != nil {
+		t.Fatalf("ensureDaemonInstallAuthentication returned error: %v", err)
 	}
 }
 

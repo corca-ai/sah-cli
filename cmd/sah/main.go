@@ -544,11 +544,10 @@ func daemonInstallCmd(args []string) error {
 		return daemonAgentSelectionError(err)
 	}
 
-	if !config.HasAuth() {
-		if err := loginAndPersist(ctx, paths, &config); err != nil {
-			return err
-		}
-	} else if err := sah.SaveConfig(paths, config); err != nil {
+	if err := ensureDaemonInstallAuthentication(ctx, paths, &config); err != nil {
+		return err
+	}
+	if err := sah.SaveConfig(paths, config); err != nil {
 		return err
 	}
 
@@ -618,6 +617,20 @@ func applyDaemonInstallOptions(
 		return err
 	}
 	return applyDaemonTimingOptions(config, options)
+}
+
+func ensureDaemonInstallAuthentication(ctx context.Context, paths sah.Paths, config *sah.Config) error {
+	if config == nil || !config.HasAuth() {
+		return fmt.Errorf("daemon install requires an existing credential; run `sah auth login` first")
+	}
+	client := sah.NewConfigClient(paths, config)
+	if _, err := client.GetMe(ctx); err != nil {
+		if sah.IsAuthenticationFailure(err) {
+			return fmt.Errorf("stored credential rejected; run `sah auth login` again")
+		}
+		return err
+	}
+	return nil
 }
 
 func applyDaemonBaseURL(config *sah.Config, options daemonInstallOptions) error {
