@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`sah` is the SCIENCE@home CLI worker for macOS and Linux. It authenticates a contributor account, discovers server-advertised help and navigation, claims assignments, runs a local coding agent CLI in a restricted empty workspace, and submits the resulting JSON payload.
+`sah` is the SCIENCE@home CLI worker for macOS and Linux. It authenticates a contributor account, discovers server-advertised help and navigation, claims assignments, runs either a local coding agent CLI or an OpenAI-compatible LLM endpoint, and submits the resulting JSON payload.
 
 ## Discovery and Help
 
@@ -39,15 +39,16 @@ rejected OAuth tokens and asks the user to run `sah auth login` again.
 - The assignment response can include a protocol version plus `_links.self`, `_links.submit`, and `_links.release`, and the same submit/release relations can also be exposed through the HTTP `Link` header.
 - During rollout, assignment responses may include both `agent_request` and `instructions`.
   `sah-cli` v0.9.x prefers the server-owned `agent_request` execution contract, while `<= v0.8.x` still renders the final prompt locally from `instructions`.
-- It runs one of the supported local agent CLIs: `codex`, `gemini`, `claude`, or `qwen`.
+- In agent backend mode, it runs one of the supported local agent CLIs: `codex`, `gemini`, `claude`, or `qwen`.
 - The agent receives no SCIENCE@home credential and runs in an empty temporary working directory.
 - Headless agent invocations are intentionally constrained:
   - Codex runs with `exec --json`, read-only sandboxing, `--ephemeral`, and an output schema file when the assignment provides one.
   - Gemini runs in sandboxed plan mode, emits `stream-json`, and disables extensions with `-e none`.
   - Claude runs in print/stream-json plan mode with tools, slash commands, user/project settings, session persistence, user plugins, auto-memory, and built-in agents disabled where Claude Code exposes controls. When Claude returns schema output through `structured_output`, `sah` treats that as the submission payload.
   - Qwen runs in sandboxed plan mode and emits `stream-json`.
-- The CLI parses the agent stdout as JSON and follows the assignment-scoped submit link when present, falling back to the legacy contribution endpoint when it is not.
-- If the local agent aborts, fails locally, or hits a submission error, `sah` releases the assignment immediately so the assignment does not stay pinned at the open-assignment limit until expiry.
+- In LLM backend mode, it sends the resolved assignment prompt to `/v1/chat/completions` on the configured OpenAI-compatible base URL. When the assignment includes a response schema, the CLI passes it as `response_format: {type: "json_schema"}` and treats constrained decoding as the API's responsibility.
+- The CLI parses the solver output as JSON and follows the assignment-scoped submit link when present, falling back to the legacy contribution endpoint when it is not.
+- If the local solver aborts, fails locally, or hits a submission error, `sah` releases the assignment immediately so the assignment does not stay pinned at the open-assignment limit until expiry.
 
 This keeps the CLI forward-compatible with new task families. As long as the server still returns one assignment payload plus one submission schema, the CLI does not need to know new task-specific endpoints ahead of time.
 
@@ -76,7 +77,7 @@ The CLI is intentionally built on normal HTTP client semantics instead of bespok
 - `sah leaderboard`
 - `sah agents`
 
-The CLI treats `sah` itself as the discovery entrypoint. It derives a local journey state from auth, detected agent CLIs, and daemon status, then merges that with server-provided navigation so successful commands can suggest follow-up commands instead of ending at raw output only.
+The CLI treats `sah` itself as the discovery entrypoint. It derives a local journey state from auth, configured backend, detected agent CLIs, and daemon status, then merges that with server-provided navigation so successful commands can suggest follow-up commands instead of ending at raw output only.
 
 Release discovery and worker-contract negotiation are described in [updates.md](updates.md).
 
@@ -93,7 +94,7 @@ Release discovery and worker-contract negotiation are described in [updates.md](
 
 ## Daemon Mode
 
-`sah daemon install` writes a per-user service definition, captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries, and starts it immediately. On macOS the service manager is `launchd`. On Linux it is `systemd --user`. Unless the user explicitly pins agents with `--agent`, `--agents`, or `--rotate-installed`, the install path detects every installed supported agent CLI and persists daemon round-robin mode automatically. If none are installed, the command fails before the service starts and tells the user to inspect `sah agents`.
+`sah daemon install` writes a per-user service definition and starts it immediately. On macOS the service manager is `launchd`. On Linux it is `systemd --user`. In agent mode, it captures the current shell `PATH`, `HOME`, and the absolute paths of installed agent binaries. Unless the user explicitly pins agents with `--agent`, `--agents`, or `--rotate-installed`, the install path detects every installed supported agent CLI and persists daemon round-robin mode automatically. If none are installed, the command fails before the service starts and tells the user to inspect `sah agents`. In LLM mode, `--backend llm --llm-url ... --llm-model ...` persists the endpoint settings and skips agent CLI detection.
 
 The daemon runs `sah run --daemon` from the saved config directory, so the service behavior is driven by persisted config defaults instead of the shell's working directory.
 

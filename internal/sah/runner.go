@@ -27,11 +27,16 @@ type AgentStatus struct {
 }
 
 type AgentRunOptions struct {
-	Agent       string
-	Model       string
-	Models      map[string]string
-	BinaryPaths map[string]string
-	Timeout     time.Duration
+	Backend        string
+	Agent          string
+	Model          string
+	Models         map[string]string
+	BinaryPaths    map[string]string
+	LLMBaseURL     string
+	LLMModel       string
+	LLMMaxTokens   int
+	LLMTemperature float64
+	Timeout        time.Duration
 }
 
 type AgentResult struct {
@@ -134,6 +139,17 @@ func CaptureInstalledAgentBinaryPaths() map[string]string {
 }
 
 func SolveAssignment(
+	ctx context.Context,
+	assignment Assignment,
+	options AgentRunOptions,
+) (*AgentResult, error) {
+	if normalizeWorkerBackend(options.Backend) == WorkerBackendLLM {
+		return solveAssignmentWithLLM(ctx, assignment, options)
+	}
+	return solveAssignmentWithAgentCLI(ctx, assignment, options)
+}
+
+func solveAssignmentWithAgentCLI(
 	ctx context.Context,
 	assignment Assignment,
 	options AgentRunOptions,

@@ -37,12 +37,22 @@ func PrintRunPlan(writer io.Writer, config Config, options WorkerOptions, pool [
 	}
 
 	_, _ = fmt.Fprintf(writer, "Base URL:   %s\n", config.BaseURL)
-	_, _ = fmt.Fprintf(writer, "Agents:     %s\n", strings.Join(names, " -> "))
-	if model := strings.TrimSpace(options.Model); model != "" {
-		_, _ = fmt.Fprintf(writer, "Model:      %s\n", model)
-	}
-	if models := FormatAgentModels(options.Models); models != "" {
-		_, _ = fmt.Fprintf(writer, "Per-agent:  %s\n", models)
+	_, _ = fmt.Fprintf(writer, "Backend:    %s\n", EffectiveWorkerBackend(config, options))
+	if EffectiveWorkerBackend(config, options) == WorkerBackendLLM {
+		_, _ = fmt.Fprintf(writer, "LLM URL:    %s\n", options.LLMBaseURL)
+		_, _ = fmt.Fprintf(writer, "LLM model:  %s\n", options.LLMModel)
+		_, _ = fmt.Fprintf(writer, "Max tokens: %d\n", options.LLMMaxTokens)
+		if options.LLMTemperature > 0 {
+			_, _ = fmt.Fprintf(writer, "Temp:       %.4g\n", options.LLMTemperature)
+		}
+	} else {
+		_, _ = fmt.Fprintf(writer, "Agents:     %s\n", strings.Join(names, " -> "))
+		if model := strings.TrimSpace(options.Model); model != "" {
+			_, _ = fmt.Fprintf(writer, "Model:      %s\n", model)
+		}
+		if models := FormatAgentModels(options.Models); models != "" {
+			_, _ = fmt.Fprintf(writer, "Per-agent:  %s\n", models)
+		}
 	}
 	_, _ = fmt.Fprintf(writer, "Interval:   %s\n", options.Interval)
 	_, _ = fmt.Fprintf(writer, "Timeout:    %s\n", options.Timeout)
@@ -69,10 +79,14 @@ func PrintCycleSummary(
 
 	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
 	_, _ = fmt.Fprintf(writer, "Assignment   #%d  %s / %s\n", assignment.AssignmentID, assignment.TaskType, assignment.TaskKey)
+	solverLabel := "Agent"
+	if result.Agent.Name == LLMAgentSpec.Name {
+		solverLabel = "Solver"
+	}
 	if result.Model != "" {
-		_, _ = fmt.Fprintf(writer, "Agent        %s (%s)\n", result.Agent.Name, result.Model)
+		_, _ = fmt.Fprintf(writer, "%-12s %s (%s)\n", solverLabel, result.Agent.Name, result.Model)
 	} else {
-		_, _ = fmt.Fprintf(writer, "Agent        %s\n", result.Agent.Name)
+		_, _ = fmt.Fprintf(writer, "%-12s %s\n", solverLabel, result.Agent.Name)
 	}
 	_, _ = fmt.Fprintf(writer, "Runtime      %s\n", humanDuration(result.Duration))
 	_, _ = fmt.Fprintf(writer, "Tokens       %s\n", formatTokenUsage(result.Agent.Name, result.Usage))

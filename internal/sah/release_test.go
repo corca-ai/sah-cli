@@ -80,6 +80,7 @@ func TestResolveWorkerContractViolationDetectsProtocolMismatchAndMissingCapabili
 	})
 	if violation == nil {
 		t.Fatal("expected worker contract violation")
+		return
 	}
 	if violation.RequiredTaskProtocolVersion != "2026-04-12" {
 		t.Fatalf("unexpected required protocol: %#v", violation)

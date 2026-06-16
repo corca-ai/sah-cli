@@ -256,6 +256,30 @@ func TestBuildRunWorkerSessionUsesConfiguredRotateInstalled(t *testing.T) {
 	}
 }
 
+func TestBuildRunWorkerSessionUsesConfiguredLLMBackendWithoutAgentCLI(t *testing.T) {
+	t.Setenv("PATH", "")
+	config := sah.DefaultConfig()
+	config.WorkerBackend = sah.WorkerBackendLLM
+	config.LLMBaseURL = "http://127.0.0.1:18080"
+	config.LLMModel = "local-model"
+
+	workerOptions, picker, err := buildRunWorkerSession(runSession{
+		config: config,
+	}, runCommandOptions{})
+	if err != nil {
+		t.Fatalf("buildRunWorkerSession returned error: %v", err)
+	}
+	if workerOptions.Backend != sah.WorkerBackendLLM {
+		t.Fatalf("expected llm backend, got %q", workerOptions.Backend)
+	}
+	if workerOptions.LLMBaseURL != config.LLMBaseURL || workerOptions.LLMModel != config.LLMModel {
+		t.Fatalf("unexpected llm options: %#v", workerOptions)
+	}
+	if got := joinAgentNames(picker.Pool()); got != "llm" {
+		t.Fatalf("expected llm solver pool, got %q", got)
+	}
+}
+
 func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *testing.T) {
 	t.Setenv("PATH", "")
 	config := sah.DefaultConfig()
@@ -276,6 +300,30 @@ func TestApplyDaemonInstallOptionsReturnsFriendlyErrorWhenNoAgentsDetected(t *te
 	}
 }
 
+func TestApplyDaemonInstallOptionsAcceptsLLMBackendWithoutAgents(t *testing.T) {
+	t.Setenv("PATH", "")
+	config := sah.DefaultConfig()
+
+	err := applyDaemonInstallOptions(&config, daemonInstallOptions{
+		backend:      "llm",
+		llmURL:       "http://127.0.0.1:18080",
+		llmModel:     "local-model",
+		llmMaxTokens: "777",
+	}, nil)
+	if err != nil {
+		t.Fatalf("applyDaemonInstallOptions returned error: %v", err)
+	}
+	if config.WorkerBackend != sah.WorkerBackendLLM {
+		t.Fatalf("expected llm backend, got %q", config.WorkerBackend)
+	}
+	if config.LLMBaseURL != "http://127.0.0.1:18080" || config.LLMModel != "local-model" {
+		t.Fatalf("unexpected llm config: %#v", config)
+	}
+	if config.LLMMaxTokens != 777 {
+		t.Fatalf("unexpected llm max tokens: %d", config.LLMMaxTokens)
+	}
+}
+
 func TestParseRunCommandOptionsRejectsEmptyAgentList(t *testing.T) {
 	for _, args := range [][]string{
 		{"--agents", ","},
@@ -284,6 +332,18 @@ func TestParseRunCommandOptionsRejectsEmptyAgentList(t *testing.T) {
 		if _, err := parseRunCommandOptions(args); err == nil {
 			t.Fatalf("expected args %#v to reject empty agent list", args)
 		}
+	}
+}
+
+func TestParseRunCommandOptionsRejectsLLMAndAgentFlagsTogether(t *testing.T) {
+	_, err := parseRunCommandOptions([]string{
+		"--backend", "llm",
+		"--agent", "codex",
+		"--llm-url", "http://127.0.0.1:18080",
+		"--llm-model", "local-model",
+	})
+	if err == nil {
+		t.Fatal("expected llm and agent flags to be rejected")
 	}
 }
 

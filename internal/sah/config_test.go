@@ -53,6 +53,9 @@ func TestNormalizeConfigDefaultsOAuthClientID(t *testing.T) {
 	if got := config.OAuthClientID; got != DefaultOAuthClientID {
 		t.Fatalf("unexpected oauth client id: %q", got)
 	}
+	if got := config.WorkerBackend; got != WorkerBackendAgent {
+		t.Fatalf("unexpected worker backend: %q", got)
+	}
 }
 
 func TestConfigHasAuthAcceptsBearerTokens(t *testing.T) {
@@ -96,6 +99,35 @@ func TestValidateBaseURL(t *testing.T) {
 		if err := ValidateBaseURL(value); err == nil {
 			t.Fatalf("expected base URL %q to be rejected", value)
 		}
+	}
+}
+
+func TestValidateWorkerBackend(t *testing.T) {
+	for _, value := range []string{"", "agent", "llm", " LLM "} {
+		if err := ValidateWorkerBackend(value); err != nil {
+			t.Fatalf("expected backend %q to be valid, got %v", value, err)
+		}
+	}
+	if err := ValidateWorkerBackend("other"); err == nil {
+		t.Fatal("expected unsupported backend to be rejected")
+	}
+}
+
+func TestParseLLMOptions(t *testing.T) {
+	if got, err := ParseLLMMaxTokens(""); err != nil || got != DefaultLLMMaxTokens {
+		t.Fatalf("unexpected default max tokens: got=%d err=%v", got, err)
+	}
+	if got, err := ParseLLMMaxTokens("512"); err != nil || got != 512 {
+		t.Fatalf("unexpected max tokens: got=%d err=%v", got, err)
+	}
+	if _, err := ParseLLMMaxTokens("0"); err == nil {
+		t.Fatal("expected zero max tokens to be rejected")
+	}
+	if got, err := ParseLLMTemperature("0.25"); err != nil || got != 0.25 {
+		t.Fatalf("unexpected temperature: got=%v err=%v", got, err)
+	}
+	if _, err := ParseLLMTemperature("-1"); err == nil {
+		t.Fatal("expected negative temperature to be rejected")
 	}
 }
 

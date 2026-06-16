@@ -265,12 +265,17 @@ func runCmd(args []string) error {
 }
 
 type runCommandOptions struct {
+	Backend         string
 	Agent           string
 	Agents          string
 	AgentsSpecified bool
 	RotateInstalled bool
 	Model           string
 	Models          string
+	LLMURL          string
+	LLMModel        string
+	LLMMaxTokens    string
+	LLMTemperature  string
 	Interval        string
 	Timeout         string
 	TaskType        string
@@ -293,11 +298,16 @@ func parseRunCommandOptions(args []string) (runCommandOptions, error) {
 	fs.SetOutput(os.Stderr)
 
 	options := runCommandOptions{}
+	fs.StringVar(&options.Backend, "backend", "", "Execution backend: agent or llm")
 	fs.StringVar(&options.Agent, "agent", "", "Agent CLI to use: codex, gemini, claude, qwen")
 	fs.StringVar(&options.Agents, "agents", "", "Comma-separated round-robin agent order, e.g. codex,gemini,claude,qwen")
 	fs.BoolVar(&options.RotateInstalled, "rotate-installed", false, "Rotate through every supported agent CLI installed on this Mac")
 	fs.StringVar(&options.Model, "model", "", "Optional model override passed to the agent CLI")
 	fs.StringVar(&options.Models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
+	fs.StringVar(&options.LLMURL, "llm-url", "", "OpenAI-compatible LLM base URL, e.g. http://127.0.0.1:18080")
+	fs.StringVar(&options.LLMModel, "llm-model", "", "LLM model name for the llm backend")
+	fs.StringVar(&options.LLMMaxTokens, "llm-max-tokens", "", "Maximum completion tokens for the llm backend")
+	fs.StringVar(&options.LLMTemperature, "llm-temperature", "", "Sampling temperature for the llm backend")
 	fs.StringVar(&options.Interval, "interval", "", "Polling interval")
 	fs.StringVar(&options.Timeout, "timeout", "", "Per-assignment agent timeout")
 	fs.StringVar(&options.TaskType, "task-type", "", "Optional task type filter")
@@ -313,6 +323,9 @@ func parseRunCommandOptions(args []string) (runCommandOptions, error) {
 		return runCommandOptions{}, err
 	}
 	if err := validateAgentFlags(options.Agent, options.Agents, options.RotateInstalled); err != nil {
+		return runCommandOptions{}, err
+	}
+	if err := validateRunBackendFlags(options); err != nil {
 		return runCommandOptions{}, err
 	}
 	if err := validateBaseURLFlag(options.BaseURL); err != nil {
@@ -406,11 +419,19 @@ func buildRunWorkerSession(
 	session runSession,
 	commandOptions runCommandOptions,
 ) (sah.WorkerOptions, *sah.AgentPicker, error) {
-	agentPool, err := resolveRunAgentPool(session.config, commandOptions, session.binaryPaths)
-	if err != nil {
-		return sah.WorkerOptions{}, nil, err
+	backend := resolveRunBackend(session.config, commandOptions)
+	if backend == sah.WorkerBackendLLM && runHasAgentOptions(commandOptions) {
+		return sah.WorkerOptions{}, nil, fmt.Errorf("llm backend cannot be combined with agent selection or agent model flags")
 	}
-	workerOptions, err := buildRunWorkerOptions(session, commandOptions, agentPool)
+	var agentPool []string
+	if backend != sah.WorkerBackendLLM {
+		var err error
+		agentPool, err = resolveRunAgentPool(session.config, commandOptions, session.binaryPaths)
+		if err != nil {
+			return sah.WorkerOptions{}, nil, err
+		}
+	}
+	workerOptions, err := buildRunWorkerOptions(session, commandOptions, backend, agentPool)
 	if err != nil {
 		return sah.WorkerOptions{}, nil, err
 	}
@@ -419,6 +440,20 @@ func buildRunWorkerSession(
 		return sah.WorkerOptions{}, nil, err
 	}
 	return workerOptions, picker, nil
+}
+
+func resolveRunBackend(config sah.Config, commandOptions runCommandOptions) string {
+	backend := strings.ToLower(strings.TrimSpace(commandOptions.Backend))
+	if backend == "" && runHasLLMOptions(commandOptions) {
+		return sah.WorkerBackendLLM
+	}
+	if backend == "" {
+		backend = strings.ToLower(strings.TrimSpace(config.WorkerBackend))
+	}
+	if backend == "" {
+		return sah.DefaultWorkerBackend
+	}
+	return backend
 }
 
 func resolveRunAgentPool(
@@ -440,6 +475,7 @@ func resolveRunAgentPool(
 		return nil, nil
 	}
 	if _, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
+		Backend:     sah.WorkerBackendAgent,
 		Agents:      agentPool,
 		BinaryPaths: binaryPaths,
 	}); err != nil {
@@ -451,6 +487,7 @@ func resolveRunAgentPool(
 func buildRunWorkerOptions(
 	session runSession,
 	commandOptions runCommandOptions,
+	backend string,
 	agentPool []string,
 ) (sah.WorkerOptions, error) {
 	config := session.config
@@ -466,14 +503,32 @@ func buildRunWorkerOptions(
 	if err != nil {
 		return sah.WorkerOptions{}, err
 	}
+	llmMaxTokens, err := resolveLLMMaxTokens(commandOptions.LLMMaxTokens, config.LLMMaxTokens)
+	if err != nil {
+		return sah.WorkerOptions{}, err
+	}
+	llmTemperature, err := resolveLLMTemperature(commandOptions.LLMTemperature, config.LLMTemperature)
+	if err != nil {
+		return sah.WorkerOptions{}, err
+	}
+	llmBaseURL := pickString(commandOptions.LLMURL, config.LLMBaseURL)
+	llmModel := pickString(commandOptions.LLMModel, config.LLMModel)
+	if err := validateResolvedLLMOptions(backend, llmBaseURL, llmModel); err != nil {
+		return sah.WorkerOptions{}, err
+	}
 
 	return sah.WorkerOptions{
+		Backend:         backend,
 		Agent:           strings.TrimSpace(commandOptions.Agent),
 		Agents:          agentPool,
 		RotateInstalled: commandOptions.RotateInstalled,
 		BinaryPaths:     session.binaryPaths,
 		Model:           pickString(commandOptions.Model, config.AgentModel),
 		Models:          sah.MergeAgentModels(config.AgentModels, agentModels),
+		LLMBaseURL:      llmBaseURL,
+		LLMModel:        llmModel,
+		LLMMaxTokens:    llmMaxTokens,
+		LLMTemperature:  llmTemperature,
 		Interval:        pollInterval,
 		Timeout:         agentTimeout,
 		TaskType:        strings.TrimSpace(commandOptions.TaskType),
@@ -507,12 +562,17 @@ func daemonCmd(args []string) error {
 }
 
 type daemonInstallOptions struct {
+	backend         string
 	agent           string
 	agents          string
 	agentsSpecified bool
 	rotateInstalled bool
 	model           string
 	models          string
+	llmURL          string
+	llmModel        string
+	llmMaxTokens    string
+	llmTemperature  string
 	interval        string
 	timeout         string
 	baseURL         string
@@ -535,9 +595,14 @@ func daemonInstallCmd(args []string) error {
 	if err := applyDaemonInstallOptions(&config, options, capturedBinaryPaths); err != nil {
 		return daemonAgentSelectionError(err)
 	}
-	config.AgentBinaryPaths = capturedBinaryPaths
+	if config.WorkerBackend == sah.WorkerBackendLLM {
+		config.AgentBinaryPaths = nil
+	} else {
+		config.AgentBinaryPaths = capturedBinaryPaths
+	}
 
 	daemonPool, err := sah.ResolveAgentPool(config, sah.WorkerOptions{
+		Backend:     config.WorkerBackend,
 		BinaryPaths: capturedBinaryPaths,
 	})
 	if err != nil {
@@ -559,17 +624,29 @@ func daemonInstallCmd(args []string) error {
 		return err
 	}
 
+	printDaemonInstallSuccess(paths, config, daemonPool)
+	return nil
+}
+
+func printDaemonInstallSuccess(paths sah.Paths, config sah.Config, daemonPool []sah.AgentSpec) {
 	fmt.Printf("Installed and started SCIENCE@home %s service.\n", sah.ServiceManagerName())
-	fmt.Printf("Daemon agent order: %s\n", joinAgentNames(daemonPool))
+	fmt.Printf("Daemon backend: %s\n", config.WorkerBackend)
+	if config.WorkerBackend == sah.WorkerBackendLLM {
+		fmt.Printf("LLM endpoint: %s\n", config.LLMBaseURL)
+		fmt.Printf("LLM model: %s\n", config.LLMModel)
+	} else {
+		fmt.Printf("Daemon agent order: %s\n", joinAgentNames(daemonPool))
+	}
 	fmt.Printf("%s: %s\n", sah.ServiceDefinitionLabel(), sah.ServiceDefinitionPath(paths))
 	fmt.Printf("Daemon logs: %s and %s\n", paths.DaemonStdoutLog, paths.DaemonStderrLog)
 	if capture := sah.ServiceCaptureValue(paths); capture != "" {
 		fmt.Printf("%s: %s\n", sah.ServiceCaptureLabel(), capture)
 	}
-	fmt.Printf("Captured PATH, HOME, and installed agent binary paths for %s. Re-run `sah daemon install` after changing agent install paths.\n", sah.ServiceManagerName())
+	if config.WorkerBackend != sah.WorkerBackendLLM {
+		fmt.Printf("Captured PATH, HOME, and installed agent binary paths for %s. Re-run `sah daemon install` after changing agent install paths.\n", sah.ServiceManagerName())
+	}
 	fmt.Println()
 	printDaemonWelcome(config.BaseURL)
-	return nil
 }
 
 func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
@@ -577,11 +654,16 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	fs.SetOutput(os.Stderr)
 
 	options := daemonInstallOptions{}
+	fs.StringVar(&options.backend, "backend", "", "Execution backend: agent or llm")
 	fs.StringVar(&options.agent, "agent", "", "Default agent CLI for the daemon")
 	fs.StringVar(&options.agents, "agents", "", "Comma-separated round-robin agent order for the daemon")
 	fs.BoolVar(&options.rotateInstalled, "rotate-installed", false, "Rotate through every installed supported agent CLI")
 	fs.StringVar(&options.model, "model", "", "Default model override")
 	fs.StringVar(&options.models, "models", "", "Per-agent model overrides, e.g. codex=gpt-5.4-mini,gemini=gemini-3-flash-base,claude=sonnet,qwen=<name>")
+	fs.StringVar(&options.llmURL, "llm-url", "", "OpenAI-compatible LLM base URL, e.g. http://127.0.0.1:18080")
+	fs.StringVar(&options.llmModel, "llm-model", "", "LLM model name for the llm backend")
+	fs.StringVar(&options.llmMaxTokens, "llm-max-tokens", "", "Maximum completion tokens for the llm backend")
+	fs.StringVar(&options.llmTemperature, "llm-temperature", "", "Sampling temperature for the llm backend")
 	fs.StringVar(&options.interval, "interval", "", "Default polling interval")
 	fs.StringVar(&options.timeout, "timeout", "", "Default per-assignment timeout")
 	fs.StringVar(&options.baseURL, "base-url", "", "SCIENCE@home base URL")
@@ -596,6 +678,9 @@ func parseDaemonInstallOptions(args []string) (daemonInstallOptions, error) {
 	if err := validateAgentFlags(options.agent, options.agents, options.rotateInstalled); err != nil {
 		return daemonInstallOptions{}, err
 	}
+	if err := validateDaemonBackendFlags(options); err != nil {
+		return daemonInstallOptions{}, err
+	}
 	if err := validateBaseURLFlag(options.baseURL); err != nil {
 		return daemonInstallOptions{}, err
 	}
@@ -608,6 +693,12 @@ func applyDaemonInstallOptions(
 	binaryPaths map[string]string,
 ) error {
 	if err := applyDaemonBaseURL(config, options); err != nil {
+		return err
+	}
+	if err := applyDaemonBackendOptions(config, options); err != nil {
+		return err
+	}
+	if err := applyDaemonLLMOptions(config, options); err != nil {
 		return err
 	}
 	if err := applyDaemonAgentSelection(config, options, binaryPaths); err != nil {
@@ -643,11 +734,59 @@ func applyDaemonBaseURL(config *sah.Config, options daemonInstallOptions) error 
 	return nil
 }
 
+func applyDaemonBackendOptions(config *sah.Config, options daemonInstallOptions) error {
+	switch {
+	case strings.TrimSpace(options.backend) != "":
+		if err := sah.ValidateWorkerBackend(options.backend); err != nil {
+			return fmt.Errorf("--backend: %w", err)
+		}
+		config.WorkerBackend = strings.ToLower(strings.TrimSpace(options.backend))
+	case daemonHasLLMOptions(options):
+		config.WorkerBackend = sah.WorkerBackendLLM
+	case strings.TrimSpace(config.WorkerBackend) == "":
+		config.WorkerBackend = sah.DefaultWorkerBackend
+	}
+	return nil
+}
+
+func applyDaemonLLMOptions(config *sah.Config, options daemonInstallOptions) error {
+	if strings.TrimSpace(options.llmURL) != "" {
+		if err := sah.ValidateBaseURL(options.llmURL); err != nil {
+			return fmt.Errorf("--llm-url: %w", err)
+		}
+		config.LLMBaseURL = strings.TrimRight(strings.TrimSpace(options.llmURL), "/")
+	}
+	if strings.TrimSpace(options.llmModel) != "" {
+		config.LLMModel = strings.TrimSpace(options.llmModel)
+	}
+	if strings.TrimSpace(options.llmMaxTokens) != "" {
+		maxTokens, err := sah.ParseLLMMaxTokens(options.llmMaxTokens)
+		if err != nil {
+			return err
+		}
+		config.LLMMaxTokens = maxTokens
+	}
+	if strings.TrimSpace(options.llmTemperature) != "" {
+		temperature, err := sah.ParseLLMTemperature(options.llmTemperature)
+		if err != nil {
+			return err
+		}
+		config.LLMTemperature = temperature
+	}
+	return validateResolvedLLMOptions(config.WorkerBackend, config.LLMBaseURL, config.LLMModel)
+}
+
 func applyDaemonAgentSelection(
 	config *sah.Config,
 	options daemonInstallOptions,
 	binaryPaths map[string]string,
 ) error {
+	if strings.TrimSpace(config.WorkerBackend) == sah.WorkerBackendLLM {
+		if daemonHasAgentOptions(options) {
+			return fmt.Errorf("llm backend cannot be combined with agent selection or agent model flags")
+		}
+		return nil
+	}
 	selectionSpecified, err := applyExplicitDaemonSelection(config, options, binaryPaths)
 	if err != nil {
 		return err
@@ -844,12 +983,24 @@ func daemonStatusCmd() error {
 	}
 
 	fmt.Printf("Base URL: %s\n", config.BaseURL)
-	fmt.Printf("Agents: %s\n", sah.DescribeAgentMode(config, sah.WorkerOptions{}))
-	if model := strings.TrimSpace(config.AgentModel); model != "" {
-		fmt.Printf("Model: %s\n", model)
-	}
-	if models := sah.FormatAgentModels(config.AgentModels); models != "" {
-		fmt.Printf("Per-agent models: %s\n", models)
+	fmt.Printf("Backend: %s\n", config.WorkerBackend)
+	if config.WorkerBackend == sah.WorkerBackendLLM {
+		fmt.Printf("LLM URL: %s\n", config.LLMBaseURL)
+		fmt.Printf("LLM model: %s\n", config.LLMModel)
+		if config.LLMMaxTokens > 0 {
+			fmt.Printf("LLM max tokens: %d\n", config.LLMMaxTokens)
+		}
+		if config.LLMTemperature > 0 {
+			fmt.Printf("LLM temperature: %.4g\n", config.LLMTemperature)
+		}
+	} else {
+		fmt.Printf("Agents: %s\n", sah.DescribeAgentMode(config, sah.WorkerOptions{}))
+		if model := strings.TrimSpace(config.AgentModel); model != "" {
+			fmt.Printf("Model: %s\n", model)
+		}
+		if models := sah.FormatAgentModels(config.AgentModels); models != "" {
+			fmt.Printf("Per-agent models: %s\n", models)
+		}
 	}
 	fmt.Printf("Interval: %s\n", config.PollInterval)
 	fmt.Printf("%s: %s\n", sah.ServiceStatusLabel(), formatServiceState(loaded, detail))
@@ -1286,6 +1437,42 @@ func pickString(primary string, fallback string) string {
 	return fallback
 }
 
+func resolveLLMMaxTokens(raw string, configured int) (int, error) {
+	if strings.TrimSpace(raw) != "" {
+		return sah.ParseLLMMaxTokens(raw)
+	}
+	if configured > 0 {
+		return configured, nil
+	}
+	return sah.DefaultLLMMaxTokens, nil
+}
+
+func resolveLLMTemperature(raw string, configured float64) (float64, error) {
+	if strings.TrimSpace(raw) != "" {
+		return sah.ParseLLMTemperature(raw)
+	}
+	if configured > 0 {
+		return configured, nil
+	}
+	return sah.DefaultLLMTemperature, nil
+}
+
+func validateResolvedLLMOptions(backend string, llmBaseURL string, llmModel string) error {
+	if strings.TrimSpace(backend) != sah.WorkerBackendLLM {
+		return nil
+	}
+	if strings.TrimSpace(llmBaseURL) == "" {
+		return fmt.Errorf("llm backend requires --llm-url or llm_base_url")
+	}
+	if err := sah.ValidateBaseURL(llmBaseURL); err != nil {
+		return fmt.Errorf("--llm-url: %w", err)
+	}
+	if strings.TrimSpace(llmModel) == "" {
+		return fmt.Errorf("llm backend requires --llm-model or llm_model")
+	}
+	return nil
+}
+
 func validateAgentFlags(agent string, agents string, rotateInstalled bool) error {
 	if rotateInstalled && (strings.TrimSpace(agent) != "" || strings.TrimSpace(agents) != "") {
 		return fmt.Errorf("--rotate-installed cannot be combined with --agent or --agents")
@@ -1294,6 +1481,73 @@ func validateAgentFlags(agent string, agents string, rotateInstalled bool) error
 		return fmt.Errorf("--agent cannot be combined with --agents")
 	}
 	return nil
+}
+
+func validateRunBackendFlags(options runCommandOptions) error {
+	return validateBackendSelectionFlags(
+		options.Backend,
+		runHasLLMOptions(options),
+		runHasAgentOptions(options),
+	)
+}
+
+func validateDaemonBackendFlags(options daemonInstallOptions) error {
+	return validateBackendSelectionFlags(
+		options.backend,
+		daemonHasLLMOptions(options),
+		daemonHasAgentOptions(options),
+	)
+}
+
+func validateBackendSelectionFlags(rawBackend string, hasLLMOptions bool, hasAgentOptions bool) error {
+	if err := sah.ValidateWorkerBackend(rawBackend); err != nil {
+		return fmt.Errorf("--backend: %w", err)
+	}
+	backend := strings.ToLower(strings.TrimSpace(rawBackend))
+	if backend == "" && hasLLMOptions {
+		backend = sah.WorkerBackendLLM
+	}
+	switch backend {
+	case sah.WorkerBackendLLM:
+		if hasAgentOptions {
+			return fmt.Errorf("llm backend cannot be combined with agent selection or agent model flags")
+		}
+	case sah.WorkerBackendAgent:
+		if hasLLMOptions {
+			return fmt.Errorf("agent backend cannot be combined with --llm-* flags")
+		}
+	}
+	return nil
+}
+
+func runHasLLMOptions(options runCommandOptions) bool {
+	return strings.TrimSpace(options.LLMURL) != "" ||
+		strings.TrimSpace(options.LLMModel) != "" ||
+		strings.TrimSpace(options.LLMMaxTokens) != "" ||
+		strings.TrimSpace(options.LLMTemperature) != ""
+}
+
+func runHasAgentOptions(options runCommandOptions) bool {
+	return strings.TrimSpace(options.Agent) != "" ||
+		strings.TrimSpace(options.Agents) != "" ||
+		options.RotateInstalled ||
+		strings.TrimSpace(options.Model) != "" ||
+		strings.TrimSpace(options.Models) != ""
+}
+
+func daemonHasLLMOptions(options daemonInstallOptions) bool {
+	return strings.TrimSpace(options.llmURL) != "" ||
+		strings.TrimSpace(options.llmModel) != "" ||
+		strings.TrimSpace(options.llmMaxTokens) != "" ||
+		strings.TrimSpace(options.llmTemperature) != ""
+}
+
+func daemonHasAgentOptions(options daemonInstallOptions) bool {
+	return strings.TrimSpace(options.agent) != "" ||
+		strings.TrimSpace(options.agents) != "" ||
+		options.rotateInstalled ||
+		strings.TrimSpace(options.model) != "" ||
+		strings.TrimSpace(options.models) != ""
 }
 
 func validateAgentsFlag(raw string, specified bool) error {

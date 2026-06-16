@@ -11,6 +11,11 @@ type AgentPicker struct {
 	index int
 }
 
+var LLMAgentSpec = AgentSpec{
+	Name:        "llm",
+	Description: "OpenAI-compatible LLM endpoint",
+}
+
 func NewAgentPicker(config Config, options WorkerOptions) (*AgentPicker, error) {
 	pool, err := ResolveAgentPool(config, options)
 	if err != nil {
@@ -32,6 +37,15 @@ func (picker *AgentPicker) Next() AgentSpec {
 }
 
 func ResolveAgentPool(config Config, options WorkerOptions) ([]AgentSpec, error) {
+	backend := EffectiveWorkerBackend(config, options)
+	switch backend {
+	case WorkerBackendLLM:
+		return []AgentSpec{LLMAgentSpec}, nil
+	case WorkerBackendAgent:
+	default:
+		return nil, fmt.Errorf("unsupported worker backend %q", backend)
+	}
+
 	binaryPaths := effectiveAgentBinaryPaths(config, options)
 	switch {
 	case options.RotateInstalled:
@@ -103,6 +117,17 @@ func ParseAgentList(raw string) []string {
 	return normalizeAgentPool(strings.Split(raw, ","))
 }
 
+func EffectiveWorkerBackend(config Config, options WorkerOptions) string {
+	backend := normalizeWorkerBackend(options.Backend)
+	if backend == "" {
+		backend = normalizeWorkerBackend(config.WorkerBackend)
+	}
+	if backend == "" {
+		return DefaultWorkerBackend
+	}
+	return backend
+}
+
 func ParseAgentModels(raw string) (map[string]string, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, nil
@@ -170,6 +195,9 @@ func ModelForAgent(agentName string, fallback string, overrides map[string]strin
 }
 
 func DescribeAgentMode(config Config, options WorkerOptions) string {
+	if EffectiveWorkerBackend(config, options) == WorkerBackendLLM {
+		return LLMAgentSpec.Name
+	}
 	if options.RotateInstalled {
 		return "all installed agents"
 	}

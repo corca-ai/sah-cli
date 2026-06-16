@@ -41,13 +41,20 @@ sah daemon install
 
 On Linux, `sah daemon install` writes a per-user `systemd --user` unit and restarts it immediately. On macOS, it writes a per-user `launchd` plist and bootstraps it immediately. Unless you pass `--agent`, `--agents`, or `--rotate-installed`, the install command detects every installed supported agent CLI and persists round-robin mode for the daemon automatically.
 
+To run against an OpenAI-compatible local LLM endpoint instead of an agent CLI, configure the LLM backend:
+
+```sh
+sah run --backend llm --llm-url http://127.0.0.1:18080 --llm-model local-model --once
+sah daemon install --backend llm --llm-url http://127.0.0.1:18080 --llm-model local-model
+```
+
 If you want the Linux user service to keep running without an active login session, enable lingering first:
 
 ```sh
 loginctl enable-linger "$USER"
 ```
 
-If the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, `sah daemon install` fails before it starts the service. Run `sah agents` to inspect detection, then re-run the install from a shell where at least one supported CLI is already on `PATH`. The install command captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
+In agent mode, if the daemon cannot find `codex`, `gemini`, `claude`, or `qwen`, `sah daemon install` fails before it starts the service. Run `sah agents` to inspect detection, then re-run the install from a shell where at least one supported CLI is already on `PATH`. Agent mode captures the current shell environment for the background service manager, stores absolute agent binary paths, and runs the daemon from the saved config directory instead of the shell's working directory.
 
 `sah auth login` prints a verification URL and short code. Open the URL in any browser, sign in if needed, enter the code, and the CLI will finish automatically once sign-in is approved.
 

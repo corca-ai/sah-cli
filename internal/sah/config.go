@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,12 +16,20 @@ import (
 const (
 	DefaultBaseURL        = "https://sah.borca.ai"
 	DefaultAgent          = "codex"
+	DefaultWorkerBackend  = WorkerBackendAgent
 	DefaultPollInterval   = 15 * time.Minute
 	DefaultAgentTimeout   = 10 * time.Minute
+	DefaultLLMMaxTokens   = 2048
+	DefaultLLMTemperature = 0
 	DefaultLaunchdLabel   = "ai.borca.sah"
 	DefaultSystemdUnit    = DefaultLaunchdLabel + ".service"
 	DefaultLaunchdCommand = "run"
 	DefaultOAuthClientID  = "sah-cli"
+)
+
+const (
+	WorkerBackendAgent = "agent"
+	WorkerBackendLLM   = "llm"
 )
 
 type Config struct {
@@ -32,6 +41,7 @@ type Config struct {
 	TokenExpiry      string            `json:"token_expiry,omitempty"`
 	OAuthClientID    string            `json:"oauth_client_id,omitempty"`
 	OAuthIssuer      string            `json:"oauth_issuer,omitempty"`
+	WorkerBackend    string            `json:"worker_backend,omitempty"`
 	DefaultAgent     string            `json:"default_agent,omitempty"`
 	AgentPool        []string          `json:"agent_pool,omitempty"`
 	RotateInstalled  bool              `json:"rotate_installed,omitempty"`
@@ -40,6 +50,10 @@ type Config struct {
 	AgentModel       string            `json:"agent_model,omitempty"`
 	AgentModels      map[string]string `json:"agent_models,omitempty"`
 	AgentTimeout     string            `json:"agent_timeout,omitempty"`
+	LLMBaseURL       string            `json:"llm_base_url,omitempty"`
+	LLMModel         string            `json:"llm_model,omitempty"`
+	LLMMaxTokens     int               `json:"llm_max_tokens,omitempty"`
+	LLMTemperature   float64           `json:"llm_temperature,omitempty"`
 }
 
 type Paths struct {
@@ -59,10 +73,11 @@ type Paths struct {
 
 func DefaultConfig() Config {
 	return Config{
-		BaseURL:      DefaultBaseURL,
-		DefaultAgent: DefaultAgent,
-		PollInterval: DefaultPollInterval.String(),
-		AgentTimeout: DefaultAgentTimeout.String(),
+		BaseURL:       DefaultBaseURL,
+		WorkerBackend: DefaultWorkerBackend,
+		DefaultAgent:  DefaultAgent,
+		PollInterval:  DefaultPollInterval.String(),
+		AgentTimeout:  DefaultAgentTimeout.String(),
 	}
 }
 
@@ -150,6 +165,15 @@ func LoadConfig(paths Paths) (Config, error) {
 	if err := ValidateBaseURL(config.BaseURL); err != nil {
 		return Config{}, fmt.Errorf("invalid base_url in config: %w", err)
 	}
+	if err := ValidateWorkerBackend(config.WorkerBackend); err != nil {
+		return Config{}, fmt.Errorf("invalid worker_backend in config: %w", err)
+	}
+	if err := validateOptionalBaseURL(config.LLMBaseURL); err != nil {
+		return Config{}, fmt.Errorf("invalid llm_base_url in config: %w", err)
+	}
+	if err := validateLLMConfigNumbers(config); err != nil {
+		return Config{}, err
+	}
 	return config, nil
 }
 
@@ -157,6 +181,15 @@ func SaveConfig(paths Paths, config Config) error {
 	config = normalizeConfig(config)
 	if err := ValidateBaseURL(config.BaseURL); err != nil {
 		return fmt.Errorf("invalid base_url: %w", err)
+	}
+	if err := ValidateWorkerBackend(config.WorkerBackend); err != nil {
+		return fmt.Errorf("invalid worker_backend: %w", err)
+	}
+	if err := validateOptionalBaseURL(config.LLMBaseURL); err != nil {
+		return fmt.Errorf("invalid llm_base_url: %w", err)
+	}
+	if err := validateLLMConfigNumbers(config); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(paths.ConfigDir, 0o755); err != nil {
 		return fmt.Errorf("create config dir: %w", err)
@@ -203,6 +236,10 @@ func normalizeConfig(config Config) Config {
 	if config.BaseURL == "" {
 		config.BaseURL = defaults.BaseURL
 	}
+	config.WorkerBackend = normalizeWorkerBackend(config.WorkerBackend)
+	if config.WorkerBackend == "" {
+		config.WorkerBackend = defaults.WorkerBackend
+	}
 	if strings.TrimSpace(config.DefaultAgent) == "" {
 		config.DefaultAgent = defaults.DefaultAgent
 	} else {
@@ -230,6 +267,8 @@ func normalizeConfig(config Config) Config {
 	if strings.TrimSpace(config.AgentTimeout) == "" {
 		config.AgentTimeout = defaults.AgentTimeout
 	}
+	config.LLMBaseURL = normalizeBaseURL(config.LLMBaseURL)
+	config.LLMModel = strings.TrimSpace(config.LLMModel)
 	return config
 }
 
@@ -257,6 +296,36 @@ func ValidateBaseURL(raw string) error {
 	}
 	if parsed.User != nil {
 		return fmt.Errorf("base URL must not include user info")
+	}
+	return nil
+}
+
+func validateOptionalBaseURL(raw string) error {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	return ValidateBaseURL(raw)
+}
+
+func normalizeWorkerBackend(raw string) string {
+	return strings.ToLower(strings.TrimSpace(raw))
+}
+
+func ValidateWorkerBackend(raw string) error {
+	switch normalizeWorkerBackend(raw) {
+	case "", WorkerBackendAgent, WorkerBackendLLM:
+		return nil
+	default:
+		return fmt.Errorf("worker backend must be %q or %q", WorkerBackendAgent, WorkerBackendLLM)
+	}
+}
+
+func validateLLMConfigNumbers(config Config) error {
+	if config.LLMMaxTokens < 0 {
+		return fmt.Errorf("invalid llm_max_tokens: must be positive")
+	}
+	if config.LLMTemperature < 0 {
+		return fmt.Errorf("invalid llm_temperature: must be non-negative")
 	}
 	return nil
 }
@@ -353,6 +422,36 @@ func ParsePollInterval(raw string) (time.Duration, error) {
 
 func ParseAgentTimeout(raw string) (time.Duration, error) {
 	return parseDurationWithDefault(raw, DefaultAgentTimeout)
+}
+
+func ParseLLMMaxTokens(raw string) (int, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return DefaultLLMMaxTokens, nil
+	}
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse max tokens %q: %w", value, err)
+	}
+	if parsed <= 0 {
+		return 0, fmt.Errorf("max tokens must be positive: %s", value)
+	}
+	return parsed, nil
+}
+
+func ParseLLMTemperature(raw string) (float64, error) {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return DefaultLLMTemperature, nil
+	}
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parse temperature %q: %w", value, err)
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("temperature must be non-negative: %s", value)
+	}
+	return parsed, nil
 }
 
 func parseDurationWithDefault(raw string, fallback time.Duration) (time.Duration, error) {

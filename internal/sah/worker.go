@@ -11,12 +11,17 @@ import (
 )
 
 type WorkerOptions struct {
+	Backend         string
 	Agent           string
 	Agents          []string
 	RotateInstalled bool
 	BinaryPaths     map[string]string
 	Model           string
 	Models          map[string]string
+	LLMBaseURL      string
+	LLMModel        string
+	LLMMaxTokens    int
+	LLMTemperature  float64
 	Interval        time.Duration
 	Timeout         time.Duration
 	TaskType        string
@@ -45,6 +50,7 @@ const releaseAssignmentTimeout = 10 * time.Second
 
 func RunWorker(ctx context.Context, paths Paths, config Config, options WorkerOptions) error {
 	client := NewConfigClient(paths, &config)
+	options = applyConfigWorkerDefaults(config, options)
 
 	if !config.HasAuth() {
 		return fmt.Errorf("not authenticated; run `sah auth login` first")
@@ -61,6 +67,32 @@ func RunWorker(ctx context.Context, paths Paths, config Config, options WorkerOp
 	}
 
 	return normalizeContextCancel(runContinuousWorker(ctx, client, picker, options))
+}
+
+func applyConfigWorkerDefaults(config Config, options WorkerOptions) WorkerOptions {
+	if strings.TrimSpace(options.Backend) == "" {
+		options.Backend = config.WorkerBackend
+	}
+	if strings.TrimSpace(options.Backend) == "" {
+		options.Backend = DefaultWorkerBackend
+	}
+	if strings.TrimSpace(options.LLMBaseURL) == "" {
+		options.LLMBaseURL = config.LLMBaseURL
+	}
+	if strings.TrimSpace(options.LLMModel) == "" {
+		options.LLMModel = config.LLMModel
+	}
+	if options.LLMMaxTokens <= 0 {
+		if config.LLMMaxTokens > 0 {
+			options.LLMMaxTokens = config.LLMMaxTokens
+		} else {
+			options.LLMMaxTokens = DefaultLLMMaxTokens
+		}
+	}
+	if options.LLMTemperature == 0 && config.LLMTemperature != 0 {
+		options.LLMTemperature = config.LLMTemperature
+	}
+	return options
 }
 
 func runContinuousWorker(
@@ -194,11 +226,16 @@ func runWorkerCycle(
 
 	logPickedAssignment(options.Output, *assignment, agent)
 	result, solveErr := solveAssignment(ctx, *assignment, AgentRunOptions{
-		Agent:       agent.Name,
-		Model:       options.Model,
-		Models:      options.Models,
-		BinaryPaths: options.BinaryPaths,
-		Timeout:     options.Timeout,
+		Backend:        options.Backend,
+		Agent:          agent.Name,
+		Model:          options.Model,
+		Models:         options.Models,
+		BinaryPaths:    options.BinaryPaths,
+		LLMBaseURL:     options.LLMBaseURL,
+		LLMModel:       options.LLMModel,
+		LLMMaxTokens:   options.LLMMaxTokens,
+		LLMTemperature: options.LLMTemperature,
+		Timeout:        options.Timeout,
 	})
 	if solveErr != nil {
 		return handleSolveAssignmentError(client, *assignment, options, agent, solveErr)

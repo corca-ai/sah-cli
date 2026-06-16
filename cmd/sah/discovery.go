@@ -27,6 +27,8 @@ const (
 type cliState struct {
 	BaseURL          string
 	AuthConfigured   bool
+	WorkerBackend    string
+	LLMConfigured    bool
 	AgentStatuses    []sah.AgentStatus
 	DetectedAgents   []string
 	HasDetectedAgent bool
@@ -48,7 +50,7 @@ type commandSuggestion struct {
 
 const (
 	cliIntroTitle   = "SCIENCE@home CLI"
-	cliIntroSummary = "`sah` links this machine to SCIENCE@home. It signs you in, claims coding tasks, runs a local agent CLI, and submits the result for credit."
+	cliIntroSummary = "`sah` links this machine to SCIENCE@home. It signs you in, claims tasks, runs a local agent CLI or LLM endpoint, and submits the result for credit."
 	maxSuggestions  = 3
 )
 
@@ -149,6 +151,8 @@ func inspectCLIStateWith(paths sah.Paths, config sah.Config, agentStatuses []sah
 	state := cliState{
 		BaseURL:         sciHomeURL(config.BaseURL),
 		AuthConfigured:  config.HasAuth(),
+		WorkerBackend:   strings.TrimSpace(config.WorkerBackend),
+		LLMConfigured:   strings.TrimSpace(config.LLMBaseURL) != "" && strings.TrimSpace(config.LLMModel) != "",
 		AgentStatuses:   append([]sah.AgentStatus(nil), agentStatuses...),
 		DaemonSupported: daemonSupported(),
 	}
@@ -211,6 +215,8 @@ func deriveJourneyStage(state cliState) journeyStage {
 		return stageDaemonRunning
 	case state.DaemonInstalled:
 		return stageDaemonStopped
+	case state.WorkerBackend == sah.WorkerBackendLLM && state.LLMConfigured:
+		return stageReadyToRun
 	case !state.HasDetectedAgent:
 		return stageNeedsAgent
 	default:
@@ -364,7 +370,11 @@ func printStateSummary(writer io.Writer, state cliState) {
 	}
 
 	_, _ = fmt.Fprintf(writer, "- Sign-in: %s\n", authSummary(state))
-	_, _ = fmt.Fprintf(writer, "- Agent CLIs: %s\n", agentSummary(state))
+	if state.WorkerBackend == sah.WorkerBackendLLM {
+		_, _ = fmt.Fprintf(writer, "- Backend: llm (%s)\n", llmSummary(state))
+	} else {
+		_, _ = fmt.Fprintf(writer, "- Agent CLIs: %s\n", agentSummary(state))
+	}
 	if state.DaemonSupported {
 		_, _ = fmt.Fprintf(writer, "- Background worker: %s\n", daemonSummary(state))
 	} else {
@@ -388,6 +398,13 @@ func agentSummary(state cliState) string {
 		return "none detected"
 	}
 	return strings.Join(state.DetectedAgents, ", ")
+}
+
+func llmSummary(state cliState) string {
+	if state.LLMConfigured {
+		return "configured"
+	}
+	return "missing endpoint or model"
 }
 
 func daemonSummary(state cliState) string {
