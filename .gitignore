@@ -2,3 +2,4 @@ bin/
 dist/
 coverage.out
 .tmp-bin/
+.DS_Store
