@@ -92,7 +92,7 @@ func TestResolveWorkerContractViolationDetectsProtocolMismatchAndMissingCapabili
 
 func TestClientGetClientRelease(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/s@h/client-release" {
+		if request.URL.Path != "/api/v3/client/release" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "application/json")

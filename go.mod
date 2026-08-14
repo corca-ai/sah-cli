@@ -1,6 +1,6 @@
 module github.com/corca-ai/sah-cli
 
-go 1.26.1
+go 1.26.6
 
 require (
 	github.com/peterbourgon/diskv v2.0.1+incompatible

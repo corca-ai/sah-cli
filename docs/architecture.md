@@ -8,8 +8,8 @@
 
 `sah` treats the server as the primary source of CLI navigation.
 
-- `sah` and `sah help` fetch `GET /s@h` for the service document when available.
-- They also send local machine state to `POST /s@h/navigation` to get ordered next-action suggestions.
+- `sah` and `sah help` fetch `GET /api/v3/client/service` for the service document when available.
+- They also send local machine state to `POST /api/v3/client/navigation` to get ordered next-action suggestions.
 - Those discovery requests intentionally run through an unauthenticated client, so stale local bearer tokens do not block public server-driven help.
 - The binary still keeps a small local kernel for commands that are inherently machine-local: `auth`, `run`, `daemon`, `agents`, and `version`.
 - The current first-party read commands `me`, `contributions`, and `leaderboard` are still explicit CLI commands in the binary, but their help text and follow-up navigation are server-advertised when the service is reachable.
@@ -35,8 +35,8 @@ rejected OAuth tokens and asks the user to run `sah auth login` again.
 
 ## Worker Loop
 
-- `sah` claims work with `POST /s@h/assignments` using `Authorization: Bearer` when an OAuth access token is available, or a stored legacy `X-API-Key` otherwise.
-- The assignment response can include a protocol version plus `_links.self`, `_links.submit`, and `_links.release`, and the same submit/release relations can also be exposed through the HTTP `Link` header.
+- `sah` claims work with native `POST /api/v3/work/assignments` using `Authorization: Bearer` when an OAuth access token is available, or a stored API key otherwise. Assignment identities are opaque strings; submission and release follow server-provided links.
+- The assignment response includes a protocol version plus `_links.self`, `_links.submit`, and `_links.release`, and the same submit/release relations can also be exposed through the HTTP `Link` header. Submissions carry a deterministic idempotency key so a transport retry cannot create duplicate work.
 - During rollout, assignment responses may include both `agent_request` and `instructions`.
   `sah-cli` v0.9.x prefers the server-owned `agent_request` execution contract, while `<= v0.8.x` still renders the final prompt locally from `instructions`.
 - In agent backend mode, it runs one of the supported local agent CLIs: `codex`, `gemini`, `claude`, or `qwen`.

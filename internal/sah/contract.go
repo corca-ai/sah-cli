@@ -8,13 +8,15 @@ import (
 )
 
 const (
-	TaskProtocolHeader           = "X-SAH-Task-Protocol"
-	ClientCapabilitiesHeader     = "X-SAH-Client-Capabilities"
-	SupportedTaskProtocol        = "2026-04-11"
-	CapabilityAssignmentLinks    = "assignment-links"
-	CapabilityScopedSubmit       = "assignment-scoped-submission"
-	CapabilityScopedRelease      = "assignment-scoped-release"
-	CapabilityServerAgentRequest = "server-agent-request"
+	TaskProtocolHeader             = "X-SAH-Task-Protocol"
+	ClientCapabilitiesHeader       = "X-SAH-Client-Capabilities"
+	SupportedTaskProtocol          = "e3-v3"
+	CapabilityAssignmentLinks      = "assignment-links"
+	CapabilityScopedSubmit         = "assignment-scoped-submission"
+	CapabilityScopedRelease        = "assignment-scoped-release"
+	CapabilityServerAgentRequest   = "server-agent-request"
+	CapabilityOpaqueAssignmentUID  = "opaque-assignment-uid"
+	CapabilityIdempotentSubmission = "idempotent-submission"
 )
 
 var supportedClientCapabilities = []string{
@@ -25,6 +27,8 @@ var supportedClientCapabilities = []string{
 	// `agent_request` prompts directly. The server should not require this until
 	// additive rollout is complete for the v0.8.x line.
 	CapabilityServerAgentRequest,
+	CapabilityOpaqueAssignmentUID,
+	CapabilityIdempotentSubmission,
 }
 
 type WorkerContractViolation struct {

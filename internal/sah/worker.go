@@ -272,16 +272,16 @@ func fetchWorkerAssignment(
 }
 
 func validateCycleAssignment(client workerClient, assignment Assignment, options WorkerOptions) error {
-	if assignment.AssignmentID <= 0 || strings.TrimSpace(assignment.TaskType) == "" {
+	if !assignment.Valid() {
 		return fmt.Errorf(
-			"task fetch returned invalid assignment payload: id=%d task_type=%q",
-			assignment.AssignmentID,
+			"task fetch returned invalid assignment payload: ref=%q task_type=%q",
+			assignment.Reference(),
 			assignment.TaskType,
 		)
 	}
 	if err := ValidateAssignmentContract(assignment); err != nil {
 		releaseAssignmentOnFailure(client, assignment, options)
-		return fmt.Errorf("assignment %d: %w", assignment.AssignmentID, err)
+		return fmt.Errorf("assignment %s: %w", assignment.Reference(), err)
 	}
 	return nil
 }
@@ -289,8 +289,8 @@ func validateCycleAssignment(client workerClient, assignment Assignment, options
 func logPickedAssignment(writer io.Writer, assignment Assignment, agent AgentSpec) {
 	logLine(
 		writer,
-		"picked assignment %d (%s / %s) with %s",
-		assignment.AssignmentID,
+		"picked assignment %s (%s / %s) with %s",
+		assignment.Reference(),
 		assignment.TaskType,
 		assignment.TaskKey,
 		agent.Name,
@@ -308,15 +308,15 @@ func handleSolveAssignmentError(
 
 	var abortErr *AbortError
 	if errors.As(solveErr, &abortErr) {
-		logLine(options.Output, "agent skipped assignment %d: %s", assignment.AssignmentID, abortErr.Reason)
-		logLine(options.Output, "released assignment %d without submission", assignment.AssignmentID)
+		logLine(options.Output, "agent skipped assignment %s: %s", assignment.Reference(), abortErr.Reason)
+		logLine(options.Output, "released assignment %s without submission", assignment.Reference())
 		return WorkerCycleResult{AgentHealthy: true}, nil
 	}
 
-	logLine(options.Output, "released assignment %d after local failure", assignment.AssignmentID)
+	logLine(options.Output, "released assignment %s after local failure", assignment.Reference())
 	return WorkerCycleResult{}, &AgentFailure{
 		Agent: agent,
-		Err:   fmt.Errorf("solve assignment %d: %w", assignment.AssignmentID, solveErr),
+		Err:   fmt.Errorf("solve assignment %s: %w", assignment.Reference(), solveErr),
 	}
 }
 
@@ -330,13 +330,13 @@ func submitSolvedAssignment(
 	response, err := client.SubmitAssignment(ctx, assignment, payload)
 	if err != nil {
 		releaseAssignmentOnFailure(client, assignment, options)
-		return nil, fmt.Errorf("submit assignment %d: %w", assignment.AssignmentID, err)
+		return nil, fmt.Errorf("submit assignment %s: %w", assignment.Reference(), err)
 	}
 	return response, nil
 }
 
 func releaseAssignmentOnFailure(client workerClient, assignment Assignment, options WorkerOptions) {
-	if client == nil || assignment.AssignmentID == 0 {
+	if client == nil || assignment.Reference() == "" {
 		return
 	}
 
@@ -350,7 +350,7 @@ func releaseAssignmentOnFailure(client workerClient, assignment Assignment, opti
 	case IsStatus(err, http.StatusNotFound), IsStatus(err, http.StatusConflict):
 		return
 	default:
-		logLine(options.ErrorOutput, "failed to release assignment %d: %v", assignment.AssignmentID, err)
+		logLine(options.ErrorOutput, "failed to release assignment %s: %v", assignment.Reference(), err)
 	}
 }
 

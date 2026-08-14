@@ -74,7 +74,7 @@ func newAnonymousLeaderboardServer(
 				"device_authorization_endpoint": %q,
 				"token_endpoint": %q
 			}`, server.URL, server.URL+"/oauth/device_authorization", tokenEndpoint)
-		case "/s@h/leaderboard":
+		case "/api/v3/recognition/leaderboard":
 			if got := request.Header.Get("Authorization"); got != "" {
 				t.Fatalf("expected anonymous fallback request, got %q", got)
 			}
@@ -406,7 +406,7 @@ func TestEnsureDaemonInstallAuthenticationRequiresCredential(t *testing.T) {
 
 func TestEnsureDaemonInstallAuthenticationRejectsStoredCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/s@h/me" {
+		if request.URL.Path != "/api/v3/accounts/me" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "application/json")
@@ -430,7 +430,7 @@ func TestEnsureDaemonInstallAuthenticationRejectsStoredCredential(t *testing.T) 
 
 func TestEnsureDaemonInstallAuthenticationAcceptsStoredCredential(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/s@h/me" {
+		if request.URL.Path != "/api/v3/accounts/me" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		if got := request.Header.Get("X-API-Key"); got != "test-key" {
@@ -541,7 +541,7 @@ func TestLeaderboardCmdUsesAPIKeyAndShowsViewerRank(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/s@h/leaderboard" {
+		if request.URL.Path != "/api/v3/recognition/leaderboard" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		if got := request.Header.Get("X-API-Key"); got != "test-key" {
@@ -596,7 +596,7 @@ func TestLeaderboardCmdFallsBackToPublicWhenStoredAPIKeyIsRejected(t *testing.T)
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		requests++
-		if request.URL.Path != "/s@h/leaderboard" {
+		if request.URL.Path != "/api/v3/recognition/leaderboard" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		if requests == 1 {
@@ -698,7 +698,7 @@ func TestMeCmdFallsBackToDisplayNameWhenLegacyNameIsMissing(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", configDir)
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/s@h/me" {
+		if request.URL.Path != "/api/v3/accounts/me" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "application/json")

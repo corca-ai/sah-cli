@@ -78,7 +78,7 @@ func PrintCycleSummary(
 	}
 
 	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
-	_, _ = fmt.Fprintf(writer, "Assignment   #%d  %s / %s\n", assignment.AssignmentID, assignment.TaskType, assignment.TaskKey)
+	_, _ = fmt.Fprintf(writer, "Assignment   %s  %s / %s\n", assignment.Reference(), assignment.TaskType, assignment.TaskKey)
 	solverLabel := "Agent"
 	if result.Agent.Name == LLMAgentSpec.Name {
 		solverLabel = "Solver"
@@ -93,11 +93,26 @@ func PrintCycleSummary(
 	_, _ = fmt.Fprintf(writer, "Contribution %s\n", SummarizeContribution(assignment, result.Payload))
 	_, _ = fmt.Fprintf(
 		writer,
-		"Submitted    contribution #%d, pending credits %d\n",
-		response.ContributionID,
+		"Submitted    %s, pending credits %d\n",
+		submissionReference(response),
 		response.PendingCredits,
 	)
 	_, _ = fmt.Fprintln(writer, strings.Repeat("=", 72))
+}
+
+func submissionReference(response *SubmitContributionResponse) string {
+	if response == nil {
+		return "contribution"
+	}
+	for _, value := range []string{response.SubmissionUID, response.ReviewUID, response.ProposalUID} {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	if response.ContributionID > 0 {
+		return fmt.Sprintf("contribution #%d", response.ContributionID)
+	}
+	return "contribution"
 }
 
 func formatTokenUsage(agentName string, usage TokenUsage) string {

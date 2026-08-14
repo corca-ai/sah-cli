@@ -8,11 +8,11 @@ Keep release discovery, worker compatibility, and CLI navigation separate while 
 
 `sah` reads three server-owned documents:
 
-- `GET /s@h`
+- `GET /api/v3/client/service`
   Service document for the CLI entrypoint and server-advertised command affordances.
-- `POST /s@h/navigation`
+- `POST /api/v3/client/navigation`
   Ordered next-command suggestions based on the local machine state the CLI reports.
-- `GET /s@h/client-release`
+- `GET /api/v3/client/release`
   Release metadata and worker-contract requirements.
 
 The CLI no longer ships a built-in `upgrade` command. Release metadata is still surfaced so the CLI can:
@@ -30,11 +30,11 @@ Safe reads share one private disk-backed HTTP cache:
 - macOS: `~/Library/Application Support/sah/http-cache/`
 - Linux: `$XDG_CONFIG_HOME/sah/http-cache/` or `~/.config/sah/http-cache/`
 
-The cache honors server `Cache-Control` headers instead of keeping bespoke JSON TTL files. That means `/s@h/client-release` uses the same transport as other safe reads such as `/s@h`, `/s@h/me`, `/s@h/contributions`, and `/s@h/leaderboard`.
+The cache honors server `Cache-Control` headers instead of keeping bespoke JSON TTL files. Native client metadata and safe account or recognition reads use the same transport and cache rules.
 
 ## Release Metadata
 
-`sah` still reads release metadata from `GET /s@h/client-release`.
+`sah` reads release metadata from `GET /api/v3/client/release`.
 
 The response includes:
 
@@ -51,13 +51,12 @@ The response includes:
 
 The CLI advertises its worker contract only on routes that claim, read, submit, or release assignments:
 
-- `POST /s@h/assignments`
-- `GET /s@h/assignments/{id}`
-- `POST /s@h/contributions`
-- `POST /s@h/assignments/{id}/submission`
-- `DELETE /s@h/assignments/{id}`
+- `POST /api/v3/work/assignments`
+- `GET /api/v3/work/assignments/{assignment_uid}`
+- `POST /api/v3/work/assignments/{assignment_uid}/submissions`
+- `DELETE /api/v3/work/assignments/{assignment_uid}`
 
-For backward compatibility, the server enforces the same contract on legacy worker routes such as `GET /s@h/tasks` and `POST /s@h/assignments/{id}/release`.
+Already released older clients remain a server-side compatibility concern; this release does not call the legacy `/s@h/*` ingress.
 
 The advertised headers are:
 

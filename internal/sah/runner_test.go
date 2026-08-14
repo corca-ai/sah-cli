@@ -333,7 +333,7 @@ func TestResolveAssignmentAgentRequestFallsBackToLegacyInstructions(t *testing.T
 	if err != nil {
 		t.Fatalf("ResolveAssignmentAgentRequest returned error: %v", err)
 	}
-	if !strings.Contains(request.Prompt, "assignment_id: 41") {
+	if !strings.Contains(request.Prompt, "assignment_ref: 41") {
 		t.Fatalf("expected legacy prompt to include assignment metadata, got %q", request.Prompt)
 	}
 	if !strings.Contains(request.Prompt, "Submission schema:") {
