@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -124,7 +125,7 @@ func newOAuthRefreshTestServer(t *testing.T, meCalls *atomic.Int32) *httptest.Se
 				"expires_in": 3600,
 				"refresh_token": "fresh-refresh-token"
 			}`))
-		case "/s@h/me":
+		case "/api/v3/accounts/me":
 			meCalls.Add(1)
 			if got := request.Header.Get("Authorization"); got != "Bearer fresh-access-token" {
 				t.Fatalf("unexpected authorization header: %q", got)
@@ -252,7 +253,7 @@ func newAssignmentResponseServer(t *testing.T, body string) *httptest.Server {
 		if request.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", request.Method)
 		}
-		if request.URL.Path != "/s@h/assignments" {
+		if request.URL.Path != "/api/v3/work/assignments" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		if got := request.Header.Get("Accept"); got != "application/json" {
@@ -266,7 +267,7 @@ func newAssignmentResponseServer(t *testing.T, body string) *httptest.Server {
 		}
 		writer.Header().Set(
 			"Link",
-			`</s@h/assignments/41/submission>; rel="submit", </s@h/assignments/41>; rel="release"`,
+			`</api/v3/work/assignments/asg_41/submissions>; rel="submit", </api/v3/work/assignments/asg_41>; rel="release"`,
 		)
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(body))
@@ -277,7 +278,7 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 	t.Parallel()
 
 	server := newAssignmentResponseServer(t, `{
-			"assignment_id": 41,
+			"assignment_uid": "asg_41",
 			"task_type": "novel-task",
 			"task_key": "novel-task/v1",
 			"payload": {"title": "Paper"},
@@ -306,10 +307,13 @@ func TestGetTaskMergesAssignmentLinksFromHeader(t *testing.T) {
 		t.Fatalf("GetTask returned error: %v", err)
 	}
 
-	if assignment.Links.Submit.Href != "/s@h/assignments/41/submission" {
+	if assignment.AssignmentUID != "asg_41" {
+		t.Fatalf("unexpected assignment uid: %q", assignment.AssignmentUID)
+	}
+	if assignment.Links.Submit.Href != "/api/v3/work/assignments/asg_41/submissions" {
 		t.Fatalf("unexpected submit href: %q", assignment.Links.Submit.Href)
 	}
-	if assignment.Links.Release.Href != "/s@h/assignments/41" {
+	if assignment.Links.Release.Href != "/api/v3/work/assignments/asg_41" {
 		t.Fatalf("unexpected release href: %q", assignment.Links.Release.Href)
 	}
 	if assignment.AgentRequest == nil || assignment.AgentRequest.Prompt != "server-owned prompt" {
@@ -321,15 +325,15 @@ func TestParseLinkHeaderKeepsCommaInsideURI(t *testing.T) {
 	t.Parallel()
 
 	links := parseLinkHeader(
-		`</s@h/assignments/41/submission?fields=payload,score>; rel="submit", </s@h/assignments/41>; rel="release"`,
+		`</api/v3/work/assignments/41/submission?fields=payload,score>; rel="submit", </api/v3/work/assignments/41>; rel="release"`,
 	)
 	if len(links) != 2 {
 		t.Fatalf("expected two links, got %#v", links)
 	}
-	if links[0].rel != "submit" || links[0].href != "/s@h/assignments/41/submission?fields=payload,score" {
+	if links[0].rel != "submit" || links[0].href != "/api/v3/work/assignments/41/submission?fields=payload,score" {
 		t.Fatalf("unexpected submit link: %#v", links[0])
 	}
-	if links[1].rel != "release" || links[1].href != "/s@h/assignments/41" {
+	if links[1].rel != "release" || links[1].href != "/api/v3/work/assignments/41" {
 		t.Fatalf("unexpected release link: %#v", links[1])
 	}
 }
@@ -338,15 +342,15 @@ func TestParseLinkHeaderKeepsCommaInsideQuotedParameter(t *testing.T) {
 	t.Parallel()
 
 	links := parseLinkHeader(
-		`</s@h/assignments/41/submission>; title="Submit, with notes"; rel="submit", </s@h/assignments/41>; rel="release"`,
+		`</api/v3/work/assignments/41/submission>; title="Submit, with notes"; rel="submit", </api/v3/work/assignments/41>; rel="release"`,
 	)
 	if len(links) != 2 {
 		t.Fatalf("expected two links, got %#v", links)
 	}
-	if links[0].rel != "submit" || links[0].href != "/s@h/assignments/41/submission" {
+	if links[0].rel != "submit" || links[0].href != "/api/v3/work/assignments/41/submission" {
 		t.Fatalf("unexpected submit link: %#v", links[0])
 	}
-	if links[1].rel != "release" || links[1].href != "/s@h/assignments/41" {
+	if links[1].rel != "release" || links[1].href != "/api/v3/work/assignments/41" {
 		t.Fatalf("unexpected release link: %#v", links[1])
 	}
 }
@@ -358,7 +362,7 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 		if request.Method != http.MethodPut {
 			t.Fatalf("unexpected method: %s", request.Method)
 		}
-		if request.URL.Path != "/s@h/assignments/41/submission" {
+		if request.URL.Path != "/api/v3/work/assignments/asg_41/submissions" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 
@@ -369,6 +373,9 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 		if _, exists := body["task_type"]; exists {
 			t.Fatalf("task_type should not be sent to assignment-scoped submission: %#v", body)
 		}
+		if got := request.Header.Get("Idempotency-Key"); !strings.HasPrefix(got, "sah-") || len(got) < 12 {
+			t.Fatalf("missing deterministic idempotency key: %q", got)
+		}
 
 		payload, ok := body["payload"].(map[string]any)
 		if !ok || payload["answer"] != "ok" {
@@ -377,8 +384,8 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 
 		writer.Header().Set("Content-Type", "application/json")
 		_, _ = writer.Write([]byte(`{
-			"assignment_id": 41,
-			"contribution_id": 99,
+			"assignment_uid": "asg_41",
+			"submission_uid": "sub_99",
 			"credits_earned": 10,
 			"pending_credits": 20
 		}`))
@@ -389,11 +396,11 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 	response, err := client.SubmitAssignment(
 		context.Background(),
 		Assignment{
-			AssignmentID: 41,
-			TaskType:     "novel-task",
+			AssignmentUID: "asg_41",
+			TaskType:      "novel-task",
 			Links: AssignmentLinks{
 				Submit: AssignmentLink{
-					Href:   "/s@h/assignments/41/submission",
+					Href:   "/api/v3/work/assignments/asg_41/submissions",
 					Method: http.MethodPut,
 				},
 			},
@@ -403,8 +410,8 @@ func TestSubmitAssignmentUsesAssignmentLinkWithoutTaskType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SubmitAssignment returned error: %v", err)
 	}
-	if response.ContributionID != 99 {
-		t.Fatalf("unexpected contribution id: %d", response.ContributionID)
+	if response.SubmissionUID != "sub_99" {
+		t.Fatalf("unexpected submission uid: %q", response.SubmissionUID)
 	}
 }
 
@@ -427,7 +434,7 @@ func TestSubmitAssignmentRejectsCrossOriginAssignmentLink(t *testing.T) {
 			TaskType:     "novel-task",
 			Links: AssignmentLinks{
 				Submit: AssignmentLink{
-					Href: externalServer.URL + "/s@h/assignments/41/submission",
+					Href: externalServer.URL + "/api/v3/work/assignments/41/submission",
 				},
 			},
 		},
@@ -448,7 +455,7 @@ func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 		if request.Method != http.MethodDelete {
 			t.Fatalf("unexpected method: %s", request.Method)
 		}
-		if request.URL.Path != "/s@h/assignments/41" {
+		if request.URL.Path != "/api/v3/work/assignments/41" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		writer.WriteHeader(http.StatusNoContent)
@@ -462,7 +469,7 @@ func TestReleaseOpenAssignmentUsesReleaseLinkMethod(t *testing.T) {
 			AssignmentID: 41,
 			Links: AssignmentLinks{
 				Release: AssignmentLink{
-					Href:   "/s@h/assignments/41",
+					Href:   "/api/v3/work/assignments/41",
 					Method: http.MethodDelete,
 				},
 			},
@@ -490,7 +497,7 @@ func TestReleaseOpenAssignmentRejectsCrossOriginAssignmentLink(t *testing.T) {
 			AssignmentID: 41,
 			Links: AssignmentLinks{
 				Release: AssignmentLink{
-					Href: externalServer.URL + "/s@h/assignments/41",
+					Href: externalServer.URL + "/api/v3/work/assignments/41",
 				},
 			},
 		},
@@ -510,7 +517,7 @@ func TestGetTaskReturnsNoContentStatusError(t *testing.T) {
 		if request.Method != http.MethodPost {
 			t.Fatalf("unexpected method: %s", request.Method)
 		}
-		if request.URL.Path != "/s@h/assignments" {
+		if request.URL.Path != "/api/v3/work/assignments" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 		writer.WriteHeader(http.StatusNoContent)
@@ -640,7 +647,7 @@ func TestGetServiceDocumentDecodesActions(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodGet || request.URL.Path != "/s@h" {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v3/client/service" {
 			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
 		}
 		writer.Header().Set("Content-Type", "application/json")
@@ -648,7 +655,7 @@ func TestGetServiceDocumentDecodesActions(t *testing.T) {
 			"title": "SCIENCE@home CLI",
 			"description": "Hypermedia entrypoint.",
 			"actions": [
-				{"command": "me", "method": "GET", "href": "/s@h/me", "title": "My account", "description": "View your account."},
+				{"command": "me", "method": "GET", "href": "/api/v3/accounts/me", "title": "My account", "description": "View your account."},
 				{"command": "auth login", "title": "Sign in", "description": "Pair this machine."}
 			]
 		}`))
@@ -660,7 +667,7 @@ func TestGetServiceDocumentDecodesActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetServiceDocument returned error: %v", err)
 	}
-	if got := document.Actions[0].Href; got != "/s@h/me" {
+	if got := document.Actions[0].Href; got != "/api/v3/accounts/me" {
 		t.Fatalf("unexpected href: %q", got)
 	}
 	if got := document.Actions[1].Command; got != "auth login" {
@@ -672,7 +679,7 @@ func TestGetNavigationPostsClientState(t *testing.T) {
 	t.Parallel()
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != http.MethodPost || request.URL.Path != "/s@h/navigation" {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v3/client/navigation" {
 			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
 		}
 
@@ -715,7 +722,7 @@ func TestGetServiceDocumentRetriesOnceOnRetryAfter(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		attempt := attempts.Add(1)
-		if request.Method != http.MethodGet || request.URL.Path != "/s@h" {
+		if request.Method != http.MethodGet || request.URL.Path != "/api/v3/client/service" {
 			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
 		}
 		if attempt == 1 {
@@ -750,7 +757,7 @@ func TestClaimAssignmentDoesNotRetryAfterOnPost(t *testing.T) {
 	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		attempts.Add(1)
-		if request.Method != http.MethodPost || request.URL.Path != "/s@h/assignments" {
+		if request.Method != http.MethodPost || request.URL.Path != "/api/v3/work/assignments" {
 			t.Fatalf("unexpected request: %s %s", request.Method, request.URL.Path)
 		}
 		writer.Header().Set("Retry-After", "0")
@@ -772,7 +779,7 @@ func TestGetServiceDocumentFollowsRedirect(t *testing.T) {
 
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		switch request.URL.Path {
-		case "/s@h":
+		case "/api/v3/client/service":
 			http.Redirect(writer, request, "/s@h/service", http.StatusTemporaryRedirect)
 		case "/s@h/service":
 			writer.Header().Set("Content-Type", "application/json")
@@ -1097,7 +1104,7 @@ func TestConfigClientFallsBackToAPIKeyWhenRefreshTokenIsRejected(t *testing.T) {
 			tokenCalls.Add(1)
 			writer.WriteHeader(http.StatusBadRequest)
 			_, _ = writer.Write([]byte(`{"error":"invalid_grant","error_description":"Refresh token is invalid"}`))
-		case "/s@h/me":
+		case "/api/v3/accounts/me":
 			meCalls.Add(1)
 			if got := request.Header.Get("Authorization"); got != "" {
 				t.Fatalf("expected authorization header to be cleared after refresh failure, got %q", got)
@@ -1197,7 +1204,7 @@ func TestConfigClientFallsBackToAPIKeyWhenStoredBearerTokenIsRejectedWithoutRefr
 	var meCalls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
-		if request.URL.Path != "/s@h/me" {
+		if request.URL.Path != "/api/v3/accounts/me" {
 			t.Fatalf("unexpected path: %s", request.URL.Path)
 		}
 
@@ -1276,7 +1283,7 @@ func newRefreshedBearerRejectedFallbackTestServer(
 				"expires_in": 3600,
 				"refresh_token": "fresh-refresh-token"
 			}`))
-		case "/s@h/me":
+		case "/api/v3/accounts/me":
 			handleRefreshedBearerRejectedFallbackMe(t, writer, request, meCalls.Add(1))
 		default:
 			t.Fatalf("unexpected path: %s", request.URL.Path)

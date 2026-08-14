@@ -59,7 +59,7 @@ func BuildLegacyAgentPrompt(assignment Assignment) (string, error) {
 		"If you cannot produce a compliant payload from the provided data, print a single line starting with ABORT: and a brief reason.",
 		"You do not have file or network access. Use only the assignment payload and instructions below.",
 		"",
-		fmt.Sprintf("assignment_id: %d", assignment.AssignmentID),
+		fmt.Sprintf("assignment_ref: %s", assignment.Reference()),
 		fmt.Sprintf("task_type: %s", assignment.TaskType),
 		fmt.Sprintf("task_key: %s", assignment.TaskKey),
 		fmt.Sprintf("instruction_version: %s", assignment.InstructionVersion),

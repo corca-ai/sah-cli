@@ -3,6 +3,7 @@ package sah
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ type Client struct {
 
 type requestOptions struct {
 	WorkerContract bool
+	IdempotencyKey string
 }
 
 const maxRetryAfterDelay = 10 * time.Second
@@ -136,7 +138,7 @@ func (client *Client) GetTask(ctx context.Context, taskType string) (*Assignment
 }
 
 func (client *Client) ClaimAssignment(ctx context.Context, taskType string) (*Assignment, error) {
-	path := "/s@h/assignments"
+	path := "/api/v3/work/assignments"
 	body := map[string]any{}
 	if encodedTaskType := strings.TrimSpace(taskType); encodedTaskType != "" {
 		body["task_type"] = encodedTaskType
@@ -164,8 +166,21 @@ func (client *Client) SubmitContribution(
 	ctx context.Context,
 	request SubmitContributionRequest,
 ) (*SubmitContributionResponse, error) {
+	if strings.TrimSpace(request.AssignmentUID) == "" {
+		return nil, fmt.Errorf("native submission requires assignment_uid")
+	}
 	var response SubmitContributionResponse
-	if err := client.doWorkerJSON(ctx, http.MethodPost, "/s@h/contributions", request, &response); err != nil {
+	if _, err := client.doJSONWithHeaders(
+		ctx,
+		http.MethodPost,
+		"/api/v3/work/submissions",
+		request,
+		&response,
+		requestOptions{
+			WorkerContract: true,
+			IdempotencyKey: directSubmissionIdempotencyKey(request),
+		},
+	); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -187,26 +202,38 @@ func (client *Client) SubmitAssignment(
 			"payload": payload,
 		}
 		var response SubmitContributionResponse
-		if err := client.doWorkerJSON(
+		if _, err := client.doJSONWithHeaders(
 			ctx,
 			linkMethodOrDefault(assignment.Links.Submit.Method, http.MethodPost),
 			endpoint,
 			request,
 			&response,
+			requestOptions{
+				WorkerContract: true,
+				IdempotencyKey: submissionIdempotencyKey(assignment, payload),
+			},
 		); err != nil {
 			return nil, err
 		}
 		return &response, nil
 	}
 	return client.SubmitContribution(ctx, SubmitContributionRequest{
-		AssignmentID: assignment.AssignmentID,
-		TaskType:     assignment.TaskType,
-		Payload:      payload,
+		AssignmentID:  assignment.AssignmentID,
+		AssignmentUID: assignment.AssignmentUID,
+		TaskType:      assignment.TaskType,
+		Payload:       payload,
 	})
 }
 
+func directSubmissionIdempotencyKey(request SubmitContributionRequest) string {
+	return submissionIdempotencyKey(
+		Assignment{AssignmentID: request.AssignmentID, AssignmentUID: request.AssignmentUID},
+		request.Payload,
+	)
+}
+
 func (client *Client) ReleaseAssignment(ctx context.Context, assignmentID int64) error {
-	path := fmt.Sprintf("/s@h/assignments/%d", assignmentID)
+	path := fmt.Sprintf("/api/v3/work/assignments/%d", assignmentID)
 	return client.doWorkerJSON(ctx, http.MethodDelete, path, nil, nil)
 }
 
@@ -229,14 +256,14 @@ func (client *Client) ReleaseOpenAssignment(ctx context.Context, assignment Assi
 
 func (client *Client) GetMe(ctx context.Context) (*MeResponse, error) {
 	var response MeResponse
-	if err := client.doJSON(ctx, http.MethodGet, "/s@h/me", nil, &response); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v3/accounts/me", nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
 }
 
 func (client *Client) GetContributions(ctx context.Context, limit int) (*ContributionsResponse, error) {
-	path := fmt.Sprintf("/s@h/contributions?limit=%d", limit)
+	path := fmt.Sprintf("/api/v3/accounts/me/contributions?limit=%d", limit)
 	var response ContributionsResponse
 	if err := client.doJSON(ctx, http.MethodGet, path, nil, &response); err != nil {
 		return nil, err
@@ -246,7 +273,7 @@ func (client *Client) GetContributions(ctx context.Context, limit int) (*Contrib
 
 func (client *Client) GetLeaderboard(ctx context.Context) (*LeaderboardResponse, error) {
 	var response LeaderboardResponse
-	if err := client.doJSON(ctx, http.MethodGet, "/s@h/leaderboard", nil, &response); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v3/recognition/leaderboard", nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -254,7 +281,7 @@ func (client *Client) GetLeaderboard(ctx context.Context) (*LeaderboardResponse,
 
 func (client *Client) GetClientRelease(ctx context.Context) (*ClientReleaseResponse, error) {
 	var response ClientReleaseResponse
-	if err := client.doJSON(ctx, http.MethodGet, "/s@h/client-release", nil, &response); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v3/client/release", nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -262,7 +289,7 @@ func (client *Client) GetClientRelease(ctx context.Context) (*ClientReleaseRespo
 
 func (client *Client) GetServiceDocument(ctx context.Context) (*ServiceDocument, error) {
 	var response ServiceDocument
-	if err := client.doJSON(ctx, http.MethodGet, "/s@h", nil, &response); err != nil {
+	if err := client.doJSON(ctx, http.MethodGet, "/api/v3/client/service", nil, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -270,7 +297,7 @@ func (client *Client) GetServiceDocument(ctx context.Context) (*ServiceDocument,
 
 func (client *Client) GetNavigation(ctx context.Context, request NavigationRequest) (*NavigationResponse, error) {
 	var response NavigationResponse
-	if err := client.doJSON(ctx, http.MethodPost, "/s@h/navigation", request, &response); err != nil {
+	if err := client.doJSON(ctx, http.MethodPost, "/api/v3/client/navigation", request, &response); err != nil {
 		return nil, err
 	}
 	return &response, nil
@@ -790,10 +817,19 @@ func (client *Client) applyJSONRequestHeaders(request *http.Request, hasBody boo
 			request.Header.Set(ClientCapabilitiesHeader, capabilities)
 		}
 	}
+	if options.IdempotencyKey != "" {
+		request.Header.Set("Idempotency-Key", options.IdempotencyKey)
+	}
 	if version := CLIVersion(); version != "" {
 		request.Header.Set("X-SAH-CLI-Version", version)
 		request.Header.Set("User-Agent", "sah/"+version)
 	}
+}
+
+func submissionIdempotencyKey(assignment Assignment, payload map[string]any) string {
+	encoded, _ := json.Marshal(payload)
+	digest := sha256.Sum256(append([]byte(assignment.Reference()+":"), encoded...))
+	return fmt.Sprintf("sah-%x", digest[:16])
 }
 
 func (client *Client) authorizationHeader() string {

@@ -292,13 +292,13 @@ func TestResolveServerNavigationFallsBackWhenServerReturnsNoActions(t *testing.T
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		switch request.URL.Path {
-		case "/s@h":
+		case "/api/v3/client/service":
 			_, _ = writer.Write([]byte(`{
 				"title": "SCIENCE@home CLI",
 				"description": "Server document",
 				"actions": [{"command":"me","description":"My account"}]
 			}`))
-		case "/s@h/navigation":
+		case "/api/v3/client/navigation":
 			_, _ = writer.Write([]byte(`{
 				"title": "Try next",
 				"description": "No recommendations right now",

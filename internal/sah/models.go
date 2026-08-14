@@ -2,12 +2,14 @@ package sah
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
 
 type Assignment struct {
 	AssignmentID       int64          `json:"assignment_id"`
+	AssignmentUID      string         `json:"assignment_uid,omitempty"`
 	TaskType           string         `json:"task_type"`
 	TaskKey            string         `json:"task_key"`
 	Payload            map[string]any `json:"payload"`
@@ -22,6 +24,20 @@ type Assignment struct {
 	AgentRequest *AssignmentAgentRequest `json:"agent_request,omitempty"`
 	Instructions AssignmentInstructions  `json:"instructions,omitempty"`
 	Links        AssignmentLinks         `json:"_links,omitempty"`
+}
+
+func (assignment Assignment) Reference() string {
+	if value := strings.TrimSpace(assignment.AssignmentUID); value != "" {
+		return value
+	}
+	if assignment.AssignmentID > 0 {
+		return fmt.Sprintf("%d", assignment.AssignmentID)
+	}
+	return ""
+}
+
+func (assignment Assignment) Valid() bool {
+	return assignment.Reference() != "" && strings.TrimSpace(assignment.TaskType) != ""
 }
 
 type AssignmentAgentRequest struct {
@@ -55,16 +71,21 @@ type AssignmentInstructions struct {
 }
 
 type SubmitContributionRequest struct {
-	AssignmentID int64          `json:"assignment_id"`
-	TaskType     string         `json:"task_type"`
-	Payload      map[string]any `json:"payload"`
+	AssignmentID  int64          `json:"assignment_id,omitempty"`
+	AssignmentUID string         `json:"assignment_uid,omitempty"`
+	TaskType      string         `json:"task_type,omitempty"`
+	Payload       map[string]any `json:"payload"`
 }
 
 type SubmitContributionResponse struct {
-	AssignmentID   int64 `json:"assignment_id"`
-	ContributionID int64 `json:"contribution_id"`
-	CreditsEarned  int   `json:"credits_earned"`
-	PendingCredits int   `json:"pending_credits"`
+	AssignmentID   int64  `json:"assignment_id"`
+	AssignmentUID  string `json:"assignment_uid,omitempty"`
+	ContributionID int64  `json:"contribution_id"`
+	SubmissionUID  string `json:"submission_uid,omitempty"`
+	ProposalUID    string `json:"proposal_uid,omitempty"`
+	ReviewUID      string `json:"review_uid,omitempty"`
+	CreditsEarned  int    `json:"credits_earned"`
+	PendingCredits int    `json:"pending_credits"`
 }
 
 type MeResponse struct {
@@ -74,6 +95,7 @@ type MeResponse struct {
 	// fields were added for anonymous-safe display.
 	Name             string    `json:"name"`
 	PublicID         string    `json:"public_id,omitempty"`
+	AccountUID       string    `json:"account_uid,omitempty"`
 	DisplayName      string    `json:"display_name,omitempty"`
 	PublicLabel      string    `json:"public_label,omitempty"`
 	Credits          int       `json:"credits"`
@@ -96,20 +118,24 @@ func (response MeResponse) PreferredName() string {
 	if publicLabel := strings.TrimSpace(response.PublicLabel); publicLabel != "" {
 		return publicLabel
 	}
-	return strings.TrimSpace(response.PublicID)
+	if publicID := strings.TrimSpace(response.PublicID); publicID != "" {
+		return publicID
+	}
+	return strings.TrimSpace(response.AccountUID)
 }
 
 type HistoryEntry struct {
-	ID           int64     `json:"id"`
-	Kind         string    `json:"kind"`
-	TaskType     string    `json:"task_type"`
-	Status       string    `json:"status"`
-	StatusLabel  string    `json:"status_label"`
-	Subject      string    `json:"subject"`
-	Note         string    `json:"note"`
-	CreatedAt    time.Time `json:"created_at"`
-	CreditAmount int       `json:"credit_amount"`
-	CreditState  string    `json:"credit_state"`
+	ID              int64     `json:"id"`
+	ContributionUID string    `json:"contribution_uid,omitempty"`
+	Kind            string    `json:"kind"`
+	TaskType        string    `json:"task_type"`
+	Status          string    `json:"status"`
+	StatusLabel     string    `json:"status_label"`
+	Subject         string    `json:"subject"`
+	Note            string    `json:"note"`
+	CreatedAt       time.Time `json:"created_at"`
+	CreditAmount    int       `json:"credit_amount"`
+	CreditState     string    `json:"credit_state"`
 }
 
 type ContributionsResponse struct {
