@@ -4,7 +4,7 @@ go 1.26.6
 
 require (
 	github.com/peterbourgon/diskv v2.0.1+incompatible
-	github.com/sandrolain/httpcache v1.4.0
+	github.com/sandrolain/httpcache v1.4.2
 )
 
 require github.com/google/btree v1.1.3 // indirect
